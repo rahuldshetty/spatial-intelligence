@@ -19,13 +19,12 @@ import pandas as pd
 import pyproj
 import rasterio
 import rioxarray
+import rio_cogeo
+import scipy
 import shapely
+import skimage
 import xarray
 
-try:
-    import osgeo  # optional (no Windows wheels for the gdal pkg)
-except ImportError:  # pragma: no cover
-    osgeo = None
 
 #: Cap on a returned docstring.
 MAX_DOC = 4000
@@ -39,7 +38,6 @@ MAX_REPR = 200
 ROOTS = {
     "rasterio": rasterio,
     "rioxarray": rioxarray,
-    "osgeo": osgeo,
     "numpy": np,
     "np": np,
     "pandas": pd,
@@ -48,6 +46,9 @@ ROOTS = {
     "gpd": gpd,
     "xarray": xarray,
     "xr": xarray,
+    "skimage": skimage,
+    "scipy": scipy,
+    "rio_cogeo": rio_cogeo,
     "shapely": shapely,
     "pyproj": pyproj,
     "json": json,

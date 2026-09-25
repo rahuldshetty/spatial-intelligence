@@ -1,8 +1,11 @@
 """Settings, notebook serialization, and agent trace persistence."""
 
+import contextlib
+import io
 import json
 import os
 import tempfile
+import threading
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -119,6 +122,34 @@ class EnvTests(DataRootTestCase):
             self.assertEqual(env.max_retries(), 5)
         with patch.dict(os.environ, {"GEOAI_MAX_RETRIES": "  "}):
             self.assertEqual(env.max_retries(), 5)
+
+    def test_a_shadowed_env_file_value_is_reported(self):
+        path = self.home / ".env"
+        path.write_text(
+            "OPENAI_API_KEY=from-the-file\nGEOAI_MODEL=openai:from-the-file\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "from-the-environment"}, clear=False):
+            shadowed = env._shadowed_keys(path)
+
+        # Every variable whose value actually differs counts — including one the
+        # test harness itself sets (GEOAI_MODEL) — and identical values do not.
+        self.assertEqual(shadowed, {"OPENAI_API_KEY", "GEOAI_MODEL"})
+
+    def test_load_env_warns_when_the_environment_wins(self):
+        (self.home / ".env").write_text("OPENAI_API_KEY=from-the-file\n", encoding="utf-8")
+        buffer = io.StringIO()
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "from-the-environment"}, clear=False):
+            with contextlib.redirect_stderr(buffer):
+                env.load_env()
+
+            # dotenv's documented precedence: the environment wins, loudly.
+            self.assertEqual(os.environ["OPENAI_API_KEY"], "from-the-environment")
+
+        self.assertIn("OPENAI_API_KEY", buffer.getvalue())
+        self.assertIn(".env", buffer.getvalue())
 
     def test_validate_env_refuses_to_start_without_the_provider_key(self):
         with patch.dict(
@@ -283,6 +314,71 @@ class SettingsPrefsTests(DataRootTestCase):
         self.assertEqual(merged["max_retries"], 2)
         self.assertEqual(merged["model"], "openai:gpt-4o-mini")
         self.assertTrue(merged["record_agent_steps"])
+
+
+class NotebookAtomicWriteTests(unittest.TestCase):
+    """A reader must never catch the notebook mid-write.
+
+    Regression: the document was rewritten in place, so a reader that arrived
+    while a save was in flight parsed a truncated file — which surfaced as an
+    empty notebook (``JSONDecodeError``) rather than as the previous one.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "notebook.ipynb"
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_a_concurrent_reader_always_sees_a_complete_document(self):
+        cells = [
+            notebook.new_cell("prompt", "summarize the parcels " + "x" * 400),
+            notebook.new_cell("python", "print('done')"),
+        ]
+        stop = threading.Event()
+        failures: list[str] = []
+
+        def write_repeatedly() -> None:
+            while not stop.is_set():
+                try:
+                    notebook.write_nb(self.path, cells)
+                except Exception as exc:  # reported as a failure, not as stderr noise
+                    failures.append(f"write: {type(exc).__name__}: {exc}")
+                    return
+
+        writer = threading.Thread(target=write_repeatedly, daemon=True)
+        writer.start()
+        try:
+            for _ in range(300):
+                if not self.path.exists():
+                    continue
+                try:
+                    payload = self.path.read_text(encoding="utf-8")
+                except PermissionError:
+                    # Windows can refuse an open for the instant the rename takes;
+                    # a real reader (a refetching client) retries. What must never
+                    # happen is a read that succeeds and parses short or empty.
+                    continue
+                try:
+                    document = json.loads(payload)
+                except Exception as exc:
+                    failures.append(f"{type(exc).__name__}: {exc}")
+                    break
+                if len(document.get("cells", [])) != len(cells):
+                    failures.append(f"read {len(document.get('cells', []))} cells")
+                    break
+        finally:
+            stop.set()
+            writer.join(timeout=5)
+
+        self.assertEqual(failures, [])
+
+    def test_writing_leaves_no_temporary_file_behind(self):
+        notebook.write_nb(self.path, [notebook.new_cell("python", "x = 1")])
+
+        leftovers = [p.name for p in self.path.parent.iterdir() if p.name != self.path.name]
+
+        self.assertEqual(leftovers, [])
+        self.assertEqual(len(json.loads(self.path.read_text(encoding="utf-8"))["cells"]), 1)
 
 
 class NotebookRoundTripTests(unittest.TestCase):

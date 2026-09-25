@@ -10,6 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy
+
 from spatial_intelligence.contracts.effects import Effect
 from spatial_intelligence.contracts.errors import ToolInputError, WorkspaceError
 from spatial_intelligence.map import document
@@ -171,6 +173,59 @@ class MapLayerServiceTests(MapTestCase):
         reloaded = layerops.find_layer(self.reload_map(), layer_id)
         self.assertEqual(reloaded["sourcePath"], url_for("data/dem.tif"))
         self.assertEqual(reloaded["metadata"][layerops.LOCAL_SOURCE_KEY], "data/dem.tif")
+
+    def test_add_raster_converts_a_striped_geotiff_and_tags_the_source(self):
+        # Regression: the app loads a COG, and a striped GeoTIFF was handed to its
+        # sidecar converter, which this harness does not run — the layer failed
+        # with "Could not convert … to a Cloud-Optimized GeoTIFF".
+        import rasterio
+        from rasterio.transform import from_origin
+
+        source = self.workspace.resolve("results/ndvi.tif", write=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(
+            source, "w", driver="GTiff", width=64, height=64, count=1, dtype="float32",
+            crs="EPSG:4326", transform=from_origin(0, 1, 0.01, 0.01), nodata=float("nan"),
+        ) as ds:
+            ds.write(numpy.full((64, 64), 0.4, dtype="float32"), 1)
+
+        layer_id = layerops.add_raster(
+            self.workspace, self.map, "results/ndvi.tif", "NDVI", file_url=url_for
+        )
+        layer = layerops.find_layer(self.map, layer_id)
+        cog = self.workspace.resolve("results/ndvi_cog.tif", must_exist=True)
+
+        with rasterio.open(cog) as ds:
+            self.assertTrue(ds.is_tiled)
+            self.assertEqual(ds.nodata != ds.nodata, True)  # NaN nodata survives
+        self.assertEqual(layer["sourcePath"], url_for("results/ndvi_cog.tif"))
+        self.assertEqual(layer["metadata"][layerops.LOCAL_SOURCE_KEY], "results/ndvi_cog.tif")
+        # The original stays: it is the analysis artifact, the COG is the display copy.
+        self.assertTrue(source.is_file())
+        self.assertEqual(
+            layerops.find_layer(self.reload_map(), layer_id)["sourcePath"],
+            url_for("results/ndvi_cog.tif"),
+        )
+
+    def test_add_raster_leaves_a_cog_untouched(self):
+        import rasterio
+        from rasterio.transform import from_origin
+
+        source = self.workspace.resolve("results/already.tif", write=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(
+            source, "w", driver="COG", width=64, height=64, count=1, dtype="uint8",
+            crs="EPSG:4326", transform=from_origin(0, 1, 0.01, 0.01),
+        ) as ds:
+            ds.write(numpy.zeros((64, 64), dtype="uint8"), 1)
+
+        layer_id = layerops.add_raster(
+            self.workspace, self.map, "results/already.tif", "Already", file_url=url_for
+        )
+        layer = layerops.find_layer(self.map, layer_id)
+
+        self.assertFalse((self.workspace.results / "already_cog.tif").exists())
+        self.assertEqual(layer["sourcePath"], url_for("results/already.tif"))
 
     def test_add_raster_passes_a_remote_url_through_untagged(self):
         layer_id = layerops.add_raster(
@@ -512,6 +567,32 @@ class LayersPackTests(MapTestCase):
         registry.add_pack(LayersPack, runtime)
         return registry
 
+    def test_the_tool_converts_a_striped_raster_and_records_the_copy(self):
+        import rasterio
+        from rasterio.transform import from_origin
+
+        source = self.workspace.resolve("data/striped.tif", write=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(
+            source, "w", driver="GTiff", width=64, height=64, count=1, dtype="float32",
+            crs="EPSG:4326", transform=from_origin(0, 1, 0.01, 0.01),
+        ) as ds:
+            ds.write(numpy.full((64, 64), 0.4, dtype="float32"), 1)
+        notifications: list[str] = []
+        registry = self.build_pack(notifications, [])
+
+        layer_id = registry.get("add_raster").callable("data/striped.tif", "Striped")
+
+        # The conversion belongs to the tool, so the copy is registered as an output
+        # and announced to the file list instead of appearing unrecorded in data/.
+        self.assertTrue((self.workspace.results / "striped_cog.tif").is_file())
+        self.assertFalse((self.workspace.data / "striped_cog.tif").exists())
+        self.assertEqual(notifications, ["files"])
+        self.assertEqual(
+            layerops.find_layer(self.map, layer_id)["sourcePath"],
+            url_for("results/striped_cog.tif"),
+        )
+
     def test_the_registered_map_tools_carry_their_documented_effects(self):
         registry = self.build_pack([], [])
         expected = {
@@ -529,6 +610,7 @@ class LayersPackTests(MapTestCase):
             "fit_bounds": frozenset({Effect.MAP_WRITE}),
             "style_layer": frozenset({Effect.MAP_WRITE}),
             "classify_layer": frozenset({Effect.MAP_WRITE}),
+            "swipe_compare": frozenset({Effect.MAP_WRITE}),
             "set_layer_visibility": frozenset({Effect.MAP_WRITE}),
             "set_layer_opacity": frozenset({Effect.MAP_WRITE}),
             "remove_layer": frozenset({Effect.MAP_WRITE}),
@@ -547,6 +629,62 @@ class LayersPackTests(MapTestCase):
         )
         self.assertNotIn("zoom_to_layer", registry)
         self.assertEqual(registry.categories(), {"layers": tuple(expected)})
+
+
+    def test_add_raster_passes_band_selection_through(self):
+        self.write("data/stack.tif", b"not-a-real-cog")
+        registry = self.build_pack([], [])
+
+        layer_id = registry.get("add_raster").callable(
+            "data/stack.tif", "Stack", None, None, [2, 1]
+        )
+
+        layer = layer_with(self.map.project, layer_id)
+        self.assertEqual(layer["metadata"]["rasterState"]["bands"], [2, 1])
+
+    def test_swipe_compare_configures_the_split_control_and_persists_it(self):
+        map_notifications: list[str] = []
+        registry = self.build_pack([], map_notifications)
+        self.geojson_file("data/points.geojson")
+        first = registry.get("add_geojson").callable("data/points.geojson", "Before")
+        second = registry.get("add_geojson").callable("data/points.geojson", "After")
+
+        result = registry.get("swipe_compare").callable(
+            ["Before"], ["After"], "horizontal", 25, "top-left"
+        )
+
+        swipe = self.map.project["plugins"]["settings"]["maplibre-gl-swipe"]
+        self.assertEqual(swipe["leftLayers"], [first])
+        self.assertEqual(swipe["rightLayers"], [second])
+        self.assertEqual(swipe["orientation"], "horizontal")
+        self.assertEqual(swipe["position"], 25.0)
+        self.assertIn("maplibre-gl-swipe", self.map.project["plugins"]["activePluginIds"])
+        self.assertEqual(
+            self.map.project["plugins"]["mapControlPositions"]["maplibre-gl-swipe"], "top-left"
+        )
+        self.assertEqual(result["status"], "applied")
+        # Both layers survive: the comparison is a control, not a replacement.
+        self.assertEqual(self.reload_map().describe()["layerCount"], 2)
+        self.assertEqual(map_notifications, ["map", "map", "map"])
+
+    def test_swipe_compare_accepts_the_basemap_as_one_side(self):
+        registry = self.build_pack([], [])
+        self.geojson_file("data/points.geojson")
+        layer_id = registry.get("add_geojson").callable("data/points.geojson", "Imagery")
+
+        registry.get("swipe_compare").callable([layer_id], ["__basemap__"])
+
+        swipe = self.map.project["plugins"]["settings"]["maplibre-gl-swipe"]
+        self.assertEqual(swipe["rightLayers"], ["__basemap__"])
+
+    def test_swipe_compare_rejects_an_unknown_layer_and_an_empty_side(self):
+        registry = self.build_pack([], [])
+
+        with self.assertRaises(ToolInputError) as caught:
+            registry.get("swipe_compare").callable(["Nope"], ["__basemap__"])
+        self.assertIn("describe_map", str(caught.exception))
+        with self.assertRaises(ToolInputError):
+            registry.get("swipe_compare").callable([], ["__basemap__"])
 
     def test_a_map_write_tool_notifies_the_map_hook(self):
         map_notifications: list[str] = []

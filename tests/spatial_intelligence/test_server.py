@@ -23,11 +23,13 @@ class ServerTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self._previous_home = os.environ.get("GEOAI_HOME")
         os.environ["GEOAI_HOME"] = self._tmp.name
-        deps.app_state.cache_clear()
+        deps.close_app_state()
         self.client = TestClient(create_app())
 
     def tearDown(self):
-        deps.app_state.cache_clear()
+        # Closes the session *and* stops its worker: clearing the cache alone
+        # left a worker thread reading a workspace that no longer exists.
+        deps.close_app_state()
         if self._previous_home is None:
             os.environ.pop("GEOAI_HOME", None)
         else:

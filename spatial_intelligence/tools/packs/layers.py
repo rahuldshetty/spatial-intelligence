@@ -6,10 +6,12 @@ survives a kernel restart and stays in sync with the workspace.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ...contracts.effects import Effect
 from ...contracts.errors import ToolInputError
+from ...geo import raster
 from ...map import bridge
 from ...map import layers as layerops
 from ..runtime import ToolRuntime
@@ -143,13 +145,22 @@ class LayersPack:
         name: str,
         colormap: str | None = None,
         rescale: list[float] | None = None,
+        bands: list[int] | None = None,
     ) -> str:
         """Add a raster (COG/GeoTIFF) layer and return its id.
 
-        ``rescale`` is a ``[min, max]`` stretch for a single band. ``colormap`` is
-        one of the names from :func:`list_colormaps` (e.g. ``"viridis"``, ``"gray"``,
-        ``"blues"``, ``"terrain"``); omit it to render the raw values.
+        ``bands`` picks which bands to draw (1-based): ``[1]`` for one band of a
+        multi-band file, ``[1, 2, 3]`` for a colour composite, ``[4]`` for a
+        single-band index such as NDVI. ``rescale`` is a ``[min, max]`` stretch for
+        a single band. ``colormap`` is one of the names from
+        :func:`list_colormaps` (e.g. ``"viridis"``, ``"gray"``, ``"blues"``,
+        ``"terrain"``); omit it to render the raw values.
+
+        A striped GeoTIFF is converted to a COG first, because that is what the
+        app can load; the conversion shows as its own progress cell and the copy
+        is registered like every other output.
         """
+        path = self._as_cog(path)
         layer_id = layerops.add_raster(
             self._rt.workspace,
             self._map,
@@ -157,10 +168,36 @@ class LayersPack:
             name,
             colormap=colormap,
             rescale=rescale,
+            bands=bands,
             file_url=self._rt.file_url,
         )
         self._mutated()
         return layer_id
+
+    def _as_cog(self, path: str) -> str:
+        """Return ``path`` or a fresh COG copy of it, recorded as an output.
+
+        ``map.layers.add_raster`` converts as a fallback too; doing it here is what
+        gives the conversion a progress cell and puts the copy in the outputs
+        manifest and the file list.
+        """
+        if path.startswith(("http://", "https://")):
+            return path
+        source = self._rt.workspace.resolve(path, must_exist=True)
+        if raster.looks_cog(source) is not False:
+            return path
+        job = self._rt.reporter.job("convert", Path(path).name, unit="bands")
+        with job:
+            converted = raster.to_cog(
+                self._rt.workspace,
+                self._rt.workspace.relative(source),
+                self._rt.workspace.relative(
+                    self._rt.workspace.results / f"{source.stem}_cog{source.suffix or '.tif'}"
+                ),
+                job=job,
+            )
+        self._rt.record_artifact(converted)
+        return self._rt.workspace.relative(converted)
 
     @tool()
     def add_tile_layer(self, url: str, name: str, attribution: str | None = None) -> str:
@@ -244,6 +281,36 @@ class LayersPack:
         """
         result = layerops.classify_layer(
             self._rt.workspace, self._map, layer, column, palette, method, k
+        )
+        self._mutated()
+        return result
+
+    @tool()
+    def swipe_compare(
+        self,
+        left: list[str],
+        right: list[str],
+        orientation: str = "vertical",
+        position: float = 50,
+        control_position: str = "top-right",
+    ) -> dict:
+        """Configure GeoLibre's swipe control to compare two sets of layers.
+
+        ``left``/``right`` are layer ids or display names, and ``__basemap__``
+        stands for the background map, which is how imagery is compared against
+        the basemap. ``orientation`` is ``vertical`` or ``horizontal`` and
+        ``position`` is the initial slider percentage (0-100). Both sides stay in
+        the project as ordinary layers, so the comparison can be unset by
+        removing or restyling the layers.
+        """
+        result = layerops.swipe_compare(
+            self._rt.workspace,
+            self._map,
+            left,
+            right,
+            orientation,
+            position,
+            control_position,
         )
         self._mutated()
         return result

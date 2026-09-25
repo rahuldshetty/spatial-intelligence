@@ -379,7 +379,10 @@ class CatalogPackTests(CatalogTestCase):
             [
                 "add_catalog_scene",
                 "download_catalog_scene",
+                "list_stac_catalogs",
                 "search_openaerialmap",
+                "search_stac_collections",
+                "search_stac_scenes",
                 "search_vantor_events",
                 "search_vantor_imagery",
             ],

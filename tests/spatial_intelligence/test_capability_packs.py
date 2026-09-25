@@ -93,7 +93,12 @@ class CapabilityCatalogTests(unittest.TestCase):
         found = discovery.discover(None, "compare before after terrain overture planet", limit=8)
 
         handoffs = [item for item in found if item["status"] == "interactive_handoff"]
-        self.assertEqual(len(handoffs), 4)
+        # Swipe and terrain used to be listed here; both now have tools, so only
+        # the two capabilities this build genuinely cannot perform are handoffs.
+        self.assertEqual(
+            sorted(item["id"] for item in handoffs),
+            ["catalog.overture", "catalog.planet-stac"],
+        )
         for item in handoffs:
             with self.subTest(capability=item["id"]):
                 self.assertTrue(item["fallback"])

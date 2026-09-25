@@ -37,13 +37,11 @@ import pandas as pd
 import pyproj
 import rasterio
 import rioxarray
+import rio_cogeo
+import scipy
 import shapely
+import skimage
 import xarray
-
-try:
-    import osgeo  # noqa: F401  - optional (no Windows wheels for the gdal pkg)
-except ImportError:  # pragma: no cover
-    osgeo = None
 
 from ..workspace import Workspace
 from .output import OutputStore
@@ -117,13 +115,15 @@ class PythonExecutor:
             "ws": _ConfinedWorkspace(self.workspace),
             "rasterio": rasterio,
             "rioxarray": rioxarray,
-            "osgeo": osgeo,
             "gpd": gpd,
             "np": np,
             "pd": pd,
             "xr": xarray,
             "shapely": shapely,
             "pyproj": pyproj,
+            "skimage": skimage,
+            "scipy": scipy,
+            "rio_cogeo": rio_cogeo,
             "json": json,
         }
 

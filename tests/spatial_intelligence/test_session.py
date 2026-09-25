@@ -11,6 +11,7 @@ import json
 import os
 import queue
 import tempfile
+import threading
 import unittest
 import urllib.error
 from pathlib import Path
@@ -21,6 +22,7 @@ from pydantic_ai.messages import ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import DeltaToolCall
 
 from spatial_intelligence.agent import capabilities as agent_capabilities
+from spatial_intelligence.map import bridge
 from spatial_intelligence.session.app_state import AppState
 from spatial_intelligence.session.notebook_session import ordered_notebook_cells
 
@@ -64,8 +66,16 @@ class SessionTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self._previous_home = os.environ.get("GEOAI_HOME")
         os.environ["GEOAI_HOME"] = self._tmp.name
+        self._states: list[AppState] = []
 
     def tearDown(self):
+        # unittest runs addCleanup callbacks *after* tearDown, so the workers are
+        # stopped here rather than in one: a worker still reading the workspace
+        # turns the removal below into a Windows file-lock error (or stalls a
+        # cell that is mid-run), and it leaves an idle thread behind per test.
+        for state in reversed(self._states):
+            self._stop(state)
+        self._states.clear()
         if self._previous_home is None:
             os.environ.pop("GEOAI_HOME", None)
         else:
@@ -83,17 +93,35 @@ class SessionTestCase(unittest.TestCase):
             },
             worker=worker,
         )
-        self.addCleanup(self._stop, state)
+        self._states.append(state)
         state.open_workspace("session-test")
         self.workspace_root = Path(self._tmp.name) / "workspaces" / "session-test"
         return state
 
     @staticmethod
     def _stop(state: AppState) -> None:
-        state.runs.wait_idle(10)
+        """Quiesce one state completely: no run left, and no worker thread left.
+
+        The timeout is passed through rather than waited out here, so a queue that
+        never drains fails the test instead of hanging the suite.
+        """
+        assert state.stop_worker(30), "the run worker was still busy after 30s"
 
     def wait_for_status(self, state: AppState, cell_id: str, statuses) -> dict:
+        """Block until the cell reaches one of ``statuses``.
+
+        Waits on the run queue's idle event first rather than polling for the whole
+        timeout: a 20 ms poll loop burns CPU, and on a loaded machine it can starve
+        the very worker it is waiting for — which is how this helper produced
+        intermittent "cell stayed 'running'" failures when the suite ran beside
+        other work. The event is set the moment the run drains.
+        """
         cell = state.notebook.find(cell_id)
+        if cell["status"] not in statuses and not state.runs.wait_idle(60):
+            self.fail(
+                f"the run queue was still busy after 60s with cell {cell_id!r} "
+                f"in status {cell['status']!r}"
+            )
         ok = wait_for(lambda: cell["status"] in statuses)
         self.assertTrue(ok, f"cell stayed {cell['status']!r}")
         return cell
@@ -110,6 +138,107 @@ class SessionTestCase(unittest.TestCase):
 
     def drainevents(self, subscriber: queue.Queue, name: str) -> list[dict]:
         return [data for event, data in self.drainall(subscriber) if event == name]
+
+
+class WorkerLifecycleTests(SessionTestCase):
+    """The run worker can be stopped, which is what makes teardown safe.
+
+    Regression: every ``AppState`` started a worker thread that was never
+    released, so a module's worth of tests left one idle thread each behind and
+    a worker could still be reading the workspace when the temp tree was
+    deleted — which surfaced as a Windows file-lock error or a stalled cell.
+    """
+
+    @staticmethod
+    def _workers() -> list[str]:
+        return [t.name for t in threading.enumerate() if t.name == "spatial-intelligence-run-worker"]
+
+    def test_app_state_starts_one_worker_and_stopping_it_ends_it(self):
+        before = len(self._workers())
+
+        state = self.start(scripted(final="ok"))
+
+        self.assertEqual(len(self._workers()), before + 1)
+
+        state.stop_worker()
+
+        # Counted as a delta: other sessions in the same process are not this
+        # test's business, and asserting a global count made it order-dependent.
+        self.assertEqual(len(self._workers()), before)
+
+    def test_stopping_is_idempotent_and_refuses_further_work(self):
+        state = self.start(scripted(final="ok"))
+        state.stop_worker()
+
+        state.stop_worker()  # a second stop is a no-op, not an error
+        with self.assertRaises(RuntimeError) as caught:
+            state.runs.submit("cell-that-nothing-would-run")
+
+        self.assertIn("shut down", str(caught.exception))
+
+    def test_a_stop_that_runs_out_of_time_says_so_and_still_ends_the_worker(self):
+        before = len(self._workers())
+        state = self.start(held_open_model())
+        cell_id = state.add_cell("prompt", "list my files")["cells"][-1]["id"]
+        state.run_cell(cell_id)
+        self.assertTrue(wait_for(lambda: state.runs.active(), timeout=10), "no run started")
+
+        # Bounded, because the server calls this from the lifespan shutdown, which
+        # uvicorn awaits without a timeout of its own: an unbounded wait is what
+        # makes the first Ctrl+C hang until a queued batch has drained.
+        self.assertFalse(state.stop_worker(0.05))
+
+        # The sentinel was queued anyway, so the worker still leaves.
+        self.assertTrue(state.stop_worker(30))
+        self.assertEqual(len(self._workers()), before)
+
+    def test_shutdown_does_not_report_idle_while_a_cell_is_still_queued(self):
+        from spatial_intelligence.session.runs import RunQueue
+
+        runs = RunQueue()
+        runs.submit("cell")
+        runs.shutdown()
+
+        self.assertFalse(runs.wait_idle(0.01))
+
+        # Taking the sentinel settles the queue, so anything waiting on it (the
+        # worker's own loop, ``Queue.join``) is not left short by the last item.
+        self.assertEqual(runs.take(), "cell")
+        runs.task_done()          # what the worker does after each cell
+        self.assertIsNone(runs.take())
+        self.assertEqual(runs._queue.unfinished_tasks, 0)
+
+        runs.start("cell")
+        runs.finish("cell")
+        self.assertTrue(runs.wait_idle(1.0))
+
+    def test_reopening_the_open_workspace_keeps_the_bridge_handshake(self):
+        self.addCleanup(bridge.reset_bridge)
+        state = self.start(scripted(final="ok"))
+        bridge.update_bridge("2.9.0", ["fitBounds"])
+
+        # The app rebuilds the iframe only when the workspace name changes, so
+        # re-opening the current one leaves the handshake describing the iframe
+        # that is still on screen.
+        state.open_workspace("session-test")
+        self.assertTrue(bridge.bridge_info()["connected"])
+        self.assertEqual(bridge.bridge_info()["version"], "2.9.0")
+
+        state.open_workspace("another-workspace")
+        self.assertFalse(bridge.bridge_info()["connected"])
+        self.assertIsNone(bridge.bridge_info()["version"])
+
+    def test_a_stopped_state_leaves_no_thread_after_the_workspace_is_gone(self):
+        before = len(self._workers())
+        state = self.start(scripted(final="ok"))
+        cell_id = state.add_cell("prompt", "hello")["cells"][-1]["id"]
+        state.run_cell(cell_id)
+        self.wait_for_status(state, cell_id, TERMINAL_STATUSES)
+
+        self._stop(state)
+
+        self.assertEqual(len(self._workers()), before)
+        self.assertTrue(self.workspace_root.is_dir())
 
 
 class PromptRunTests(SessionTestCase):

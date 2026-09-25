@@ -8,12 +8,11 @@ offered, because the map renders them as COG layers.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 from urllib.parse import urljoin
 
 from ...contracts.errors import ToolInputError
 from .base import event_id as event_id_of
-from .base import fetch_json, links, search_terms
+from .base import bbox_intersects, fetch_json, links, search_terms
 from .scenes import SceneCache, scene_key
 
 #: STAC root of the Vantor Open Data event catalog.
@@ -105,7 +104,7 @@ def search_vantor_imagery(
         item_phase = str(props.get("phase") or "").lower().replace("-event", "")
         if phase != "all" and item_phase != phase:
             continue
-        if not _bbox_intersects(item.get("bbox"), bounds):
+        if not bbox_intersects(item.get("bbox"), bounds):
             continue
         cog_url = _https_asset(item, "visual")
         if not cog_url:
@@ -131,20 +130,6 @@ def search_vantor_imagery(
         scenes.append(cache.remember(scene))
     scenes.sort(key=lambda scene: str(scene.get("datetime") or ""), reverse=True)
     return scenes[: max(1, min(limit, 100))]
-
-
-def _bbox_intersects(item_bbox: Any, bounds: list[float] | None) -> bool:
-    """Whether an item's bbox overlaps the query bounds (unknown bbox: yes)."""
-    if bounds is None or not isinstance(item_bbox, list) or len(item_bbox) < 4:
-        return True
-    west, south, east, north = map(float, item_bbox[:4])
-    query_west, query_south, query_east, query_north = bounds
-    return (
-        west <= query_east
-        and east >= query_west
-        and south <= query_north
-        and north >= query_south
-    )
 
 
 def _https_asset(item: dict, preferred: str | None = None) -> str | None:

@@ -47,6 +47,19 @@ class SandboxGuardTests(unittest.TestCase):
 
         self.assertIsNone(guard(ast.parse(code)))
 
+    def test_allows_the_image_processing_stack(self):
+        code = (
+            "import skimage\n"
+            "import scipy\n"
+            "import PIL, PIL.Image\n"
+            "import rio_cogeo\n"
+            "import tifffile\n"
+            "from skimage import filters, measure, morphology, segmentation\n"
+            "scipy.ndimage.gaussian_filter(crop, 1.0)\n"
+        )
+
+        self.assertIsNone(guard(ast.parse(code)))
+
     def test_only_calls_are_blocked_not_bare_attribute_access(self):
         self.assertIsNone(guard(ast.parse("import os\nrunner = os.system")))
 
@@ -429,6 +442,27 @@ class PythonPackTests(PythonTestCase):
         )
         self.assertNotIn("blocked", run("import subprocess\nsubprocess.__name__"))
 
+    def test_a_snippet_can_use_skimage_and_scipy_for_imagery(self):
+        _, runtime = self.build_pack()
+        # The pack creates the executor itself; the dynamic import here was a
+        # one-off that hid the fixture type for no reason.
+        executor = runtime.services["python.executor"]
+
+        preview = executor.run(
+            "import numpy as np, skimage, scipy\n"
+            "from skimage import measure, filters, morphology\n"
+            "grid = np.add.outer(np.arange(8.0), np.arange(8.0))\n"
+            "smoothed = filters.gaussian(grid, sigma=0.6, preserve_range=True)\n"
+            "print('contours', len(measure.find_contours(smoothed, 6.0)))\n"
+            "print('thickened', int(morphology.dilation(grid > 6).sum()))\n"
+            "print('corr', round(float(scipy.stats.pearsonr(grid.ravel(), smoothed.ravel())[0]), 3))\n"
+        )
+
+        self.assertNotIn("blocked", preview)
+        self.assertIn("contours", preview)
+        self.assertIn("thickened", preview)
+        self.assertIn("corr 1.0", preview)
+
     def test_python_help_describes_the_sandbox_namespace(self):
         registry, _ = self.build_pack()
         describe = registry.get("python_help").callable
@@ -438,6 +472,12 @@ class PythonPackTests(PythonTestCase):
         self.assertIn("ws", roots["roots"])
         self.assertIn("rasterio", roots["roots"])
         self.assertIn("numpy", roots["roots"])
+        self.assertIn("skimage", roots["roots"])
+        self.assertIn("scipy", roots["roots"])
+        self.assertIn("rio_cogeo", roots["roots"])
+
+        # An unknown root is an error, and the listing names what exists.
+        self.assertEqual(describe("nope")["kind"], "error")
 
         ws = describe("ws")
         self.assertEqual(ws["kind"], "workspace helper")

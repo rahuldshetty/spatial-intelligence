@@ -18,6 +18,13 @@ import ast
 ALLOWED_IMPORTS = frozenset({
     "numpy", "pandas", "geopandas", "rasterio", "rioxarray", "xarray",
     "shapely", "pyproj",
+    # Image processing and scientific routines: skimage/scipy are what generated
+    # snippets use for filtering, morphology, segmentation, and statistics.
+    # Reading a raster over HTTP is already possible through rasterio, so these
+    # add no new class of access.
+    "skimage", "scipy", "tifffile", "PIL",
+    # COG validation/creation, the tool GeoLibre's own error message names.
+    "rio_cogeo",
     "os", "sys", "pathlib", "shutil", "time", "glob", "csv", "tempfile",
     "json", "math", "re", "collections", "datetime", "functools", "itertools",
     "statistics", "fractions", "decimal", "copy", "random", "string", "typing",

@@ -7,11 +7,14 @@ can raise domain errors instead of translating them one by one.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ..contracts.errors import ToolInputError, WorkspaceError
+from . import deps
 from .assets import WEB_DIR
 from .routers import events, files, state, workspace
 
@@ -44,9 +47,21 @@ def _register_error_handlers(app: FastAPI) -> None:
         return JSONResponse({"detail": str(detail)}, status_code=404)
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Run the app, then stop the process-wide session's worker on shutdown.
+
+    Without this the agent's run worker thread outlives the serving loop: it is a
+    daemon, so the process still exits, but nothing closes the workspace handles
+    it holds and a managed restart would leave the previous session behind.
+    """
+    yield
+    deps.close_app_state()
+
+
 def create_app() -> FastAPI:
     """Build the application (routers, static mount, and the shell route)."""
-    app = FastAPI(title="Spatial Intelligence")
+    app = FastAPI(title="Spatial Intelligence", lifespan=_lifespan)
     _register_error_handlers(app)
     app.include_router(state.router)
     app.include_router(workspace.router)

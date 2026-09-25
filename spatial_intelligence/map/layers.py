@@ -23,6 +23,7 @@ from geolibre import authoring as geolibre_authoring
 
 from ..contracts.errors import ToolInputError
 from ..workspace import Workspace, WorkspaceError
+from ..geo import raster
 from . import styles
 from .document import persist_map
 
@@ -56,6 +57,7 @@ __all__ = [
     "set_layer_opacity",
     "set_layer_visibility",
     "set_view",
+    "swipe_compare",
     "style_layer",
 ]
 
@@ -293,11 +295,14 @@ def add_raster(
     *,
     colormap: str | None = None,
     rescale: list[float] | None = None,
+    bands: list[int] | None = None,
     file_url: Callable[[str], str] | None = None,
 ) -> str:
     """Add a raster (COG/GeoTIFF) layer and return its id.
 
-    ``rescale`` is a ``[min, max]`` stretch for a single band. ``colormap`` is
+    ``bands`` selects the bands to draw (1-based) -- ``[1]`` for one band of a
+    multi-band file, ``[1, 2, 3]`` for a colour composite. ``rescale`` is a
+    ``[min, max]`` stretch for a single band. ``colormap`` is
     one of the names from :func:`list_colormaps` (e.g. ``"viridis"``, ``"gray"``,
     ``"blues"``, ``"terrain"``); omit it to render the raw values.
 
@@ -309,10 +314,17 @@ def add_raster(
     rel = None
     if not _is_url(path):
         resolved = workspace.resolve(path, must_exist=True)
-        rel = workspace.relative(resolved)
-        path = file_url(rel) if file_url is not None else str(resolved)
+        # The app loads a COG: handed a striped GeoTIFF it asks its Python
+        # sidecar to convert the file, and this harness embeds the static app
+        # without that sidecar, so the conversion could never succeed. Convert
+        # here, so every raster any tool wrote is loadable on the map.
+        loadable, _ = raster.to_cog_if_needed(workspace, path)
+        rel = workspace.relative(loadable)
+        path = file_url(rel) if file_url is not None else str(loadable)
     rescale_arg = [list(rescale)] if rescale else None
-    layer_id = map_obj.add_raster(path, name, colormap=colormap, rescale=rescale_arg)
+    layer_id = map_obj.add_raster(
+        path, name, bands=bands, colormap=colormap, rescale=rescale_arg
+    )
     if rel is not None and file_url is not None:
         _tag_local_source(map_obj, layer_id, rel)
     persist_map(map_obj, workspace)
@@ -363,6 +375,73 @@ def set_basemap(workspace: Workspace, map_obj: Map, basemap: str) -> dict:
     persist_map(map_obj, workspace)
     return {"status": "applied", "basemap": basemap}
 
+
+
+#: Swipe placeholder selecting the basemap as one side of the comparison.
+#: Geolibre's own sentinel, not a second copy of the literal: it crosses this
+#: boundary in both directions, so one definition has to win.
+BASEMAP_SIDE = geolibre_authoring.BASEMAP_LAYER_ID
+
+
+def _layer_ids(map_obj: Map, refs: list[str]) -> list[str]:
+    """Resolve layer references (id or display name) to layer ids.
+
+    ``__basemap__`` passes through: GeoLibre's split map can compare a layer
+    against the basemap itself, which is how "before/after imagery over the
+    basemap" is expressed.
+    """
+    known = layers(map_obj)
+    ids = {str(layer.get("id")) for layer in known}
+    by_name = {str(layer.get("name")): str(layer.get("id")) for layer in known}
+    resolved: list[str] = []
+    for ref in refs:
+        if ref == BASEMAP_SIDE:
+            resolved.append(ref)
+        elif ref in ids:
+            resolved.append(ref)
+        elif ref in by_name:
+            resolved.append(by_name[ref])
+        else:
+            raise ToolInputError(
+                f"unknown layer {ref!r}; call describe_map for the layer ids and names"
+            )
+    return resolved
+
+
+def swipe_compare(
+    workspace: Workspace,
+    map_obj: Map,
+    left: list[str],
+    right: list[str],
+    orientation: str = "vertical",
+    position: float = 50,
+    control_position: str = "top-right",
+) -> dict:
+    """Configure the split-map (swipe) control between two sets of layers.
+
+    ``left``/``right`` are layer ids or display names, and ``__basemap__`` stands
+    for the background map. ``orientation`` is ``vertical`` or ``horizontal``;
+    ``position`` is the initial slider percentage; ``control_position`` is which
+    corner holds the handle. GeoLibre draws the two sides as one comparison, so
+    the layers stay in the project and remain individually styleable.
+    """
+    left_ids = _layer_ids(map_obj, list(left))
+    right_ids = _layer_ids(map_obj, list(right))
+    if not left_ids or not right_ids:
+        raise ToolInputError("swipe_compare needs at least one layer on each side")
+    try:
+        state = geolibre_authoring.add_swipe(
+            map_obj.project,
+            left_layers=left_ids,
+            right_layers=right_ids,
+            orientation=orientation,
+            position=position,
+            control_position=control_position,
+        )
+    except ValueError as exc:
+        raise ToolInputError(str(exc)) from exc
+    persist_map(map_obj, workspace)
+    return {"status": "applied", "swipe": state}
 
 def style_layer(
     workspace: Workspace, map_obj: Map, layer: str, style: dict[str, Any]

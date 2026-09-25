@@ -41,15 +41,15 @@ EXPECTED_CORE = frozenset(
 
 EXPECTED_CATEGORY_COUNTS = {
     "capability": 2,
-    "catalog": 5,
+    "catalog": 8,
     "files": 6,
     "interaction": 1,
-    "layers": 22,
+    "layers": 23,
     "plan": 6,
     "python": 4,
-    "raster": 9,
+    "raster": 17,
     "search": 1,
-    "vector": 6,
+    "vector": 25,
 }
 
 
@@ -68,7 +68,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 62)
+        self.assertEqual(len(self.registry), 93)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -112,7 +112,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 55)
+        self.assertEqual(len(implemented), 86)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)
@@ -144,6 +144,108 @@ class ManifestTests(ManifestTestCase):
         )
 
 
+#: The tools each capability routes to, pinned. ``discover_capabilities`` is how
+#: the model finds its way to the right pack, and a tool missing from this table is
+#: a tool the model has to reach by exact name — which is how ``reproject_vector``
+#: silently dropped out of the routing index when the vector tools were expanded.
+#: Changing this dict is how a new tool is advertised, not an accident.
+EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
+    "workspace.files": (
+        "list_files",
+        "find_files",
+        "read_file",
+        "write_file",
+        "download",
+        "download_files",
+    ),
+    "map.layers": (
+        "add_raster",
+        "add_vector",
+        "add_vector_to_map",
+        "add_geojson",
+        "add_heatmap",
+        "swipe_compare",
+        "style_layer",
+        "fit_bounds",
+    ),
+    "raster.processing": (
+        "raster_info",
+        "raster_stats",
+        "clip",
+        "reproject",
+        "rescale",
+        "band_math",
+        "to_cog",
+        "spectral_index",
+        "zonal_stats",
+        "hillshade",
+        "slope",
+        "aspect",
+        "polygonize",
+        "contour",
+        "compose_rgb",
+        "gdal_translate",
+        "sample_point",
+    ),
+    "vector.processing": (
+        "list_layers",
+        "read_vector",
+        "check_geometry",
+        "fix_geometry",
+        "reproject_vector",
+        "buffer",
+        "clip_vector",
+        "dissolve",
+        "overlay",
+        "spatial_join",
+        "attribute_join",
+        "select_by_value",
+        "select_by_location",
+        "aggregate",
+        "centroids",
+        "convex_hull",
+        "bounding_box",
+        "simplify",
+        "explode",
+        "voronoi",
+        "points_along",
+        "grid",
+        "export_vector",
+        "add_heatmap",
+    ),
+    "python.execution": (
+        "run_python",
+        "inspect_output",
+        "query_output",
+        "python_help",
+    ),
+    "catalog.disaster-imagery": (
+        "search_vantor_events",
+        "search_vantor_imagery",
+        "search_openaerialmap",
+        "add_catalog_scene",
+        "download_catalog_scene",
+    ),
+    "catalog.satellite-imagery": (
+        "list_stac_catalogs",
+        "search_stac_collections",
+        "search_stac_scenes",
+        "add_catalog_scene",
+        "download_catalog_scene",
+    ),
+    "catalog.planet-stac": (),
+    "map.compare": (
+        "swipe_compare",
+    ),
+    "map.terrain": (
+        "hillshade",
+        "slope",
+        "aspect",
+    ),
+    "catalog.overture": (),
+}
+
+
 class DriftTests(ManifestTestCase):
     def test_plan_tool_names_match_the_installed_harness(self):
         from pydantic_ai_harness.planning._toolset import CORE_TOOL_NAMES
@@ -155,6 +257,16 @@ class DriftTests(ManifestTestCase):
         from pydantic_ai.toolsets._tool_search import TOOL_SEARCH_FUNCTION_TOOL_NAME
 
         self.assertEqual(TOOL_SEARCH_NAME, TOOL_SEARCH_FUNCTION_TOOL_NAME)
+
+
+    def test_the_routing_index_matches_the_capability_table(self):
+        self.assertEqual(
+            sorted(cap.id for cap in discovery.CAPABILITIES),
+            sorted(EXPECTED_CAPABILITY_TOOLS),
+        )
+        for capability in discovery.CAPABILITIES:
+            with self.subTest(capability=capability.id):
+                self.assertEqual(capability.tools, EXPECTED_CAPABILITY_TOOLS[capability.id])
 
 
 class DiscoveryTests(ManifestTestCase):

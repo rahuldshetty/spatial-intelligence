@@ -15,6 +15,7 @@ import traceback
 from ..agent.model import validate_model
 from ..agent.runner import PromptRunner, RunnerHooks
 from ..contracts.errors import ToolInputError
+from ..map.bridge import reset_bridge
 from ..settings import prefs
 from ..settings.env import DEFAULT_MODEL, list_workspaces
 from ..tools.runtime import ToolRuntime, bind
@@ -125,6 +126,13 @@ class AppState:
     def open_workspace(self, name: str) -> dict:
         """Open a workspace, binding a fresh runtime and agent to it."""
         self.runs.wait_idle()
+        # The map iframe is replaced when the workspace name changes, so the
+        # recorded handshake belongs to an iframe that is gone until the new one
+        # posts its own. Re-opening the workspace that is already open leaves the
+        # iframe in place, and clearing the record there would report the live
+        # app as disconnected for the rest of the session.
+        if name != self.workspaces.name:
+            reset_bridge()
         with self.lock:
             workspace = self.workspaces.open(name)
             self.notebook.load(workspace)
@@ -144,6 +152,7 @@ class AppState:
     def close_workspace(self) -> dict:
         """Close the open workspace and reset the map and notebook."""
         self.runs.wait_idle()
+        reset_bridge()
         with self.lock:
             self.workspaces.close()
             self.notebook.close()
@@ -287,9 +296,38 @@ class AppState:
         )
         self._worker.start()
 
+    def stop_worker(self, timeout: float | None = None) -> bool:
+        """Stop the run worker and wait for it to leave, if one is running.
+
+        The server does not need this while it serves, but every other owner
+        does: a stopped worker is what makes it safe to delete or replace the
+        workspace tree, and it stops a process from accumulating one idle thread
+        per opened session. Idempotent, so a caller may stop an already-stopped
+        state.
+
+        ``timeout`` bounds the wait for the queue to drain and for the thread to
+        leave, and returning ``False`` says it was still busy. The server passes
+        a bound because it calls this from the lifespan shutdown, which uvicorn
+        awaits without one: an unbounded wait would make the first Ctrl+C hang
+        until a queued batch finished. The sentinel is queued either way, so a
+        worker that outlasts the bound still leaves once its cell ends.
+        """
+        worker = self._worker
+        if worker is None:
+            return True
+        self.runs.wait_idle(timeout)
+        self.runs.shutdown()
+        worker.join(timeout)
+        if worker.is_alive():
+            return False
+        self._worker = None
+        return True
+
     def _worker_loop(self) -> None:
         while True:
             cell_id = self.runs.take()
+            if cell_id is None:  # the queue was shut down
+                return
             try:
                 token = self.runs.start(cell_id)
                 if token is None:

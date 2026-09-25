@@ -5,17 +5,25 @@ root, so route wiring, error mapping, and the workspace-file CORS contract are
 covered without starting uvicorn.
 """
 
+import contextlib
+import io
 import json
 import os
 import queue
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from starlette.testclient import TestClient
 
-from spatial_intelligence.server import deps
+from spatial_intelligence.discovery import CAPABILITIES
+from spatial_intelligence.settings.env import app_root
+from spatial_intelligence.server import banner, deps
 from spatial_intelligence.server.app import create_app
+from spatial_intelligence.tools.build import default_registry
+from spatial_intelligence.tools.runtime import ToolRuntime
+from spatial_intelligence.workspace import Workspace
 
 
 class ServerTestCase(unittest.TestCase):
@@ -253,3 +261,93 @@ class EventStreamTests(ServerTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartupReportTests(unittest.TestCase):
+    """The banner and metadata block the server prints when it starts."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        # The tool surface is a property of the build, so the table is built from a
+        # registry whose workspace is never created.
+        self.registry = default_registry(
+            ToolRuntime(workspace=Workspace(Path(self._tmp.name) / "introspection"))
+        )
+
+    def test_the_wordmark_is_art_and_the_fallback_is_plain_ascii(self):
+        for art in (banner.BANNER_BLOCKS, banner.BANNER_ASCII):
+            self.assertEqual(len(art.splitlines()), 10)
+            self.assertFalse(art.startswith("\\"))
+
+        self.assertTrue(banner.BANNER_ASCII.isascii())
+        self.assertIn(banner.TAGLINE, banner.banner())
+
+    def test_the_report_names_the_totals_every_category_and_every_capability(self):
+        text = banner.startup_report(self.registry)
+
+        self.assertIn(f"{len(self.registry)} registered", text)
+        self.assertIn(f"{len(self.registry.core_names())} always visible", text)
+        for category, names in self.registry.categories().items():
+            with self.subTest(category=category):
+                self.assertIn(f"{category} ({len(names)})", text)
+                for name in names:
+                    self.assertIn(name, text)
+        for capability in CAPABILITIES:
+            self.assertIn(capability.id, text)
+        # Metadata that has to be there for the block to be worth printing: the
+        # interpreter, and where the workspaces will be read from.
+        self.assertIn(sys.version.split()[0], text)
+        self.assertIn(str(app_root() / "workspaces"), text)
+
+    def test_every_line_stays_inside_the_configured_width(self):
+        text = banner.startup_report(self.registry)
+
+        widest = max(len(line) for line in text.splitlines())
+
+        self.assertLessEqual(widest, banner.WIDTH)
+
+    def test_a_stream_that_cannot_take_the_glyphs_degrades_instead_of_failing(self):
+        class Narrow:
+            """A single-byte stream: what a redirected stdout can look like.
+
+            ``io.StringIO`` takes any character, so the encoding has to be enforced
+            here to reproduce the failure this path exists for.
+            """
+
+            encoding = "ascii"
+
+            def __init__(self) -> None:
+                self.chunks: list[str] = []
+
+            def write(self, text: str) -> None:
+                text.encode(self.encoding)          # raises for a block glyph
+                self.chunks.append(text)
+
+            def flush(self) -> None:
+                pass
+
+            def getvalue(self) -> str:
+                return "".join(self.chunks)
+
+        narrow = Narrow()
+        with contextlib.redirect_stdout(narrow):
+            # The wordmark itself is chosen for this stream, and a report that
+            # still holds a glyph is replaced rather than raising on startup.
+            self.assertEqual(
+                banner.banner().splitlines()[1], banner.BANNER_ASCII.splitlines()[1]
+            )
+            banner.announce("block glyph: \u2588")
+
+        written = narrow.getvalue()
+        self.assertNotIn("\u2588", written)
+        self.assertIn("block glyph", written)
+
+    def test_announce_prints_and_returns_the_report(self):
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            returned = banner.announce("hello")
+
+        self.assertEqual(returned, "hello")
+        self.assertEqual(buffer.getvalue().strip(), "hello")

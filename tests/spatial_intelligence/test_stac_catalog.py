@@ -3,6 +3,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,6 +25,19 @@ EARTH_SEARCH_COLLECTIONS_URL = (
 PC_SEARCH_URL = f"{stac.PLANETARY_COMPUTER_API}/search"
 PC_TOKEN_URL = f"{stac.PLANETARY_COMPUTER_SAS_API}/sentinel-2-l2a"
 PC_ASSET_URL = "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/x/visual.tif"
+
+
+def pc_token(*, seconds: float = 3600.0) -> dict:
+    """A signing-endpoint response whose token is good for ``seconds`` from now.
+
+    The expiry has to move with the clock: a hard-coded timestamp starts out valid
+    and later turns every cached-token assertion into a re-fetch assertion.
+    """
+    expires = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return {
+        "token": "se=2026&sig=abc",
+        "msft:expiry": expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
 
 #: The STAC scene shape, pinned so a provider cannot quietly add or drop a field
 #: the download and map tools read. (The Vantor and OpenAerialMap scenes are
@@ -517,7 +531,7 @@ class PlanetaryComputerSigningTests(StacTestCase):
         transport = RecordingTransport(
             {
                 PC_SEARCH_URL: search_body([pc_item("item-1"), pc_item("item-2")]),
-                PC_TOKEN_URL: {"token": "se=2026&sig=abc", "msft:expiry": "2026-09-25T21:00:00Z"},
+                PC_TOKEN_URL: pc_token(),
             }
         )
         sas = stac.SasTokenCache()
@@ -541,7 +555,7 @@ class PlanetaryComputerSigningTests(StacTestCase):
         transport = RecordingTransport(
             {
                 PC_SEARCH_URL: search_body([pc_item("item-1")]),
-                PC_TOKEN_URL: {"token": "se=2026&sig=abc", "msft:expiry": "2026-09-25T21:00:00Z"},
+                PC_TOKEN_URL: pc_token(),
             }
         )
         sas = stac.SasTokenCache()

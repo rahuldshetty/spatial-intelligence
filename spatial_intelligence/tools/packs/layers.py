@@ -212,7 +212,18 @@ class LayersPack:
     def add_wms(
         self, endpoint: str, layers: str, name: str, styles: str | None = None
     ) -> str:
-        """Add a WMS tiled layer and return its id."""
+        """Add a WMS tiled layer and return its id.
+
+        ``layers`` is the service's LAYER value (comma-separated for several).
+        ``styles`` is its STYLES value; omit it for the service default.
+
+        A service that selects its frame by date takes that date on the endpoint,
+        e.g. ``https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?TIME=2026-09-24``:
+        the layer builder appends its own GetMap parameters after the existing
+        query, so the date is preserved. A service whose tiles only exist up to a
+        low zoom is better added as WMS than as XYZ, because the WMS request is
+        rendered per tile box and keeps working when the user zooms in.
+        """
         layer_id = layerops.add_wms(
             self._rt.workspace, self._map, endpoint, layers, name, styles=styles
         )
@@ -288,15 +299,16 @@ class LayersPack:
     @tool()
     def swipe_compare(
         self,
-        left: list[str],
-        right: list[str],
+        left: str | list[str],
+        right: str | list[str],
         orientation: str = "vertical",
         position: float = 50,
         control_position: str = "top-right",
     ) -> dict:
         """Configure GeoLibre's swipe control to compare two sets of layers.
 
-        ``left``/``right`` are layer ids or display names, and ``__basemap__``
+        ``left``/``right`` are a layer id or display name, or a list of them; a
+        single name is the usual call. ``__basemap__``
         stands for the background map, which is how imagery is compared against
         the basemap. ``orientation`` is ``vertical`` or ``horizontal`` and
         ``position`` is the initial slider percentage (0-100). Both sides stay in

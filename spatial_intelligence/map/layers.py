@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from urllib.parse import unquote, urlparse
 
 from geolibre import Map
@@ -348,8 +348,21 @@ def add_wms(
     name: str,
     styles: str | None = None,
 ) -> str:
-    """Add a WMS tiled layer and return its id."""
-    layer_id = map_obj.add_wms(endpoint, layers, clean_layer_name(name), styles=styles)
+    """Add a WMS tiled layer and return its id.
+
+    ``styles`` is the service's ``STYLES`` parameter; an empty string asks for the
+    default style, which is also what a caller who passes nothing means. It must
+    reach the layer builder as a string: GeoLibre encodes the query with
+    ``urllib.parse.quote``, which rejects ``None`` ("quote_from_bytes() expected
+    bytes") and would fail the whole call.
+
+    A service that selects its frame by date carries that date on the endpoint
+    (``.../wms.cgi?TIME=2026-09-24``); the builder appends its own parameters to
+    whatever query is already there, so the date survives.
+    """
+    layer_id = map_obj.add_wms(
+        endpoint, layers, clean_layer_name(name), styles=styles or ""
+    )
     persist_map(map_obj, workspace)
     return layer_id
 
@@ -383,6 +396,17 @@ def set_basemap(workspace: Workspace, map_obj: Map, basemap: str) -> dict:
 BASEMAP_SIDE = geolibre_authoring.BASEMAP_LAYER_ID
 
 
+def _refs(value: str | Iterable[str]) -> list[str]:
+    """Return layer references from a single name or a list of them.
+
+    A bare name is the common call, and iterating it directly would split it into
+    characters ("unknown layer 'R'").
+    """
+    if isinstance(value, str):
+        return [value]
+    return [str(item) for item in value]
+
+
 def _layer_ids(map_obj: Map, refs: list[str]) -> list[str]:
     """Resolve layer references (id or display name) to layer ids.
 
@@ -411,22 +435,23 @@ def _layer_ids(map_obj: Map, refs: list[str]) -> list[str]:
 def swipe_compare(
     workspace: Workspace,
     map_obj: Map,
-    left: list[str],
-    right: list[str],
+    left: str | list[str],
+    right: str | list[str],
     orientation: str = "vertical",
     position: float = 50,
     control_position: str = "top-right",
 ) -> dict:
     """Configure the split-map (swipe) control between two sets of layers.
 
-    ``left``/``right`` are layer ids or display names, and ``__basemap__`` stands
-    for the background map. ``orientation`` is ``vertical`` or ``horizontal``;
-    ``position`` is the initial slider percentage; ``control_position`` is which
-    corner holds the handle. GeoLibre draws the two sides as one comparison, so
-    the layers stay in the project and remain individually styleable.
+    ``left``/``right`` are layer ids or display names — one name or a list of them
+    — and ``__basemap__`` stands for the background map. ``orientation`` is
+    ``vertical`` or ``horizontal``; ``position`` is the initial slider percentage;
+    ``control_position`` is which corner holds the handle. GeoLibre draws the two
+    sides as one comparison, so the layers stay in the project and remain
+    individually styleable.
     """
-    left_ids = _layer_ids(map_obj, list(left))
-    right_ids = _layer_ids(map_obj, list(right))
+    left_ids = _layer_ids(map_obj, _refs(left))
+    right_ids = _layer_ids(map_obj, _refs(right))
     if not left_ids or not right_ids:
         raise ToolInputError("swipe_compare needs at least one layer on each side")
     try:

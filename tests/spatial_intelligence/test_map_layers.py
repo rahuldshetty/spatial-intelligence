@@ -552,6 +552,82 @@ class MapLayerServiceTests(MapTestCase):
         self.assertGreater(len(ramps["viridis"]), 1)
 
 
+    def test_add_wms_appends_the_getmap_parameters_to_a_dated_endpoint(self):
+        endpoint = "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?TIME=2026-09-24"
+
+        layer_id = layerops.add_wms(
+            self.workspace, self.map, endpoint, "IMERG_Precipitation_Rate", "Rain 24 Sep"
+        )
+        layer = layerops.find_layer(self.map, layer_id)
+        tiles = layer["source"]["tiles"][0]
+
+        # the date the caller put on the endpoint survives, and the GetMap
+        # parameters are appended after it
+        self.assertIn("?TIME=2026-09-24&SERVICE=WMS", tiles)
+        self.assertIn("LAYERS=IMERG_Precipitation_Rate", tiles)
+        self.assertIn("SRS=EPSG%3A3857", tiles)
+        self.assertIn("WIDTH=256", tiles)
+        self.assertEqual(layer["source"]["url"], endpoint)
+
+    def test_add_wms_without_a_style_asks_for_the_default_one(self):
+        # Regression: an omitted style reached the layer builder as None, and
+        # GeoLibre encodes the query with quote(), which rejects None - every
+        # add_wms call failed with "quote_from_bytes() expected bytes".
+        layer_id = layerops.add_wms(
+            self.workspace, self.map, "https://example.com/wms", "some_layer", "Default style"
+        )
+
+        tiles = layerops.find_layer(self.map, layer_id)["source"]["tiles"][0]
+
+        self.assertIn("STYLES=&", tiles)
+
+    def test_swipe_compare_takes_a_layer_name_or_a_list_of_them(self):
+        # Regression: a bare name was iterated as characters, so a one-name side
+        # failed with "unknown layer 'R'".
+        first = layerops.add_tile_layer(self.workspace, self.map, "https://a.example/{z}/{x}/{y}.png", "Before")
+        second = layerops.add_tile_layer(self.workspace, self.map, "https://b.example/{z}/{x}/{y}.png", "After")
+
+        by_name = layerops.swipe_compare(self.workspace, self.map, "Before", "After")
+        self.assertEqual(by_name["status"], "applied")
+        # each side also carries the layer's derived style-layer ids, so the side
+        # that received the layer is asserted by membership
+        self.assertIn(first, by_name["swipe"]["leftLayers"])
+        self.assertIn(second, by_name["swipe"]["rightLayers"])
+        self.assertNotIn(second, by_name["swipe"]["leftLayers"])
+        self.assertEqual(by_name["swipe"]["orientation"], "vertical")
+
+        by_list = layerops.swipe_compare(
+            self.workspace, self.map, [first], [second], orientation="horizontal"
+        )
+        self.assertIn(first, by_list["swipe"]["leftLayers"])
+        self.assertEqual(by_list["swipe"]["orientation"], "horizontal")
+
+    def test_swipe_compare_can_compare_a_layer_with_the_basemap(self):
+        layer_id = layerops.add_tile_layer(self.workspace, self.map, "https://a.example/{z}/{x}/{y}.png", "Imagery")
+
+        result = layerops.swipe_compare(self.workspace, self.map, "Imagery", "__basemap__")
+
+        self.assertIn(layer_id, result["swipe"]["leftLayers"])
+        self.assertEqual(result["swipe"]["rightLayers"], ["__basemap__"])
+
+    def test_swipe_compare_names_the_layer_it_cannot_find(self):
+        with self.assertRaises(ToolInputError) as caught:
+            layerops.swipe_compare(self.workspace, self.map, "No such layer", "__basemap__")
+
+        # the whole name, not the first character of it
+        self.assertIn("No such layer", str(caught.exception))
+
+    def test_add_wms_passes_an_explicit_style_through(self):
+        layer_id = layerops.add_wms(
+            self.workspace, self.map, "https://example.com/wms", "some_layer", "Styled",
+            styles="bright",
+        )
+
+        tiles = layerops.find_layer(self.map, layer_id)["source"]["tiles"][0]
+
+        self.assertIn("STYLES=bright", tiles)
+
+
 class LayersPackTests(MapTestCase):
     def build_pack(self, notifications: list[str], map_notifications: list[str]):
         runtime = ToolRuntime(
@@ -592,6 +668,34 @@ class LayersPackTests(MapTestCase):
             layerops.find_layer(self.map, layer_id)["sourcePath"],
             url_for("results/striped_cog.tif"),
         )
+
+    def test_the_swipe_tool_compares_two_layers_by_name(self):
+        notifications: list[str] = []
+        map_notifications: list[str] = []
+        registry = self.build_pack(notifications, map_notifications)
+        add_tile = registry.get("add_tile_layer").callable
+        before_id = add_tile("https://a.example/{z}/{x}/{y}.png", "Rain 19 Sep")
+        after_id = add_tile("https://b.example/{z}/{x}/{y}.png", "Rain 24 Sep")
+
+        result = registry.get("swipe_compare").callable("Rain 19 Sep", "Rain 24 Sep")
+
+        self.assertEqual(result["status"], "applied")
+        self.assertIn(before_id, result["swipe"]["leftLayers"])
+        self.assertIn(after_id, result["swipe"]["rightLayers"])
+
+    def test_the_wms_tool_adds_a_layer_the_app_can_request(self):
+        notifications: list[str] = []
+        map_notifications: list[str] = []
+        registry = self.build_pack(notifications, map_notifications)
+
+        # the model omits styles, which is the shape that used to fail
+        layer_id = registry.get("add_wms").callable(
+            "https://example.com/wms?TIME=2026-09-19", "IMERG_Precipitation_Rate", "Rain 19 Sep"
+        )
+
+        layer = layerops.find_layer(self.map, layer_id)
+        self.assertIn("TIME=2026-09-19", layer["source"]["tiles"][0])
+        self.assertEqual(map_notifications, ["map"])
 
     def test_the_registered_map_tools_carry_their_documented_effects(self):
         registry = self.build_pack([], [])

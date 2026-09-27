@@ -118,6 +118,58 @@ routes, and the web components.
   progress cell; multiple independent downloads can run in parallel. Search
   metadata is cached under `traces/catalog-scenes.json` so a paused selection
   survives a restart.
+- **Satellite imagery and elevation (STAC)** — the same flow covers any STAC
+  catalog the GeoLibre STAC panel browses. `list_stac_catalogs` and
+  `search_stac_collections` find a collection (`sentinel-2-l2a`, `landsat-c2-l2`,
+  `naip`, `sentinel-1-grd`, `cop-dem-glo-30`, …), `search_stac_scenes` searches
+  it by area, date range, and cloud cover — newest or clearest first — and the
+  returned `scene_key` feeds the same download and `add_catalog_scene` tools the
+  disaster catalogs use. AWS Earth Search assets are public; Planetary Computer
+  asset URLs are signed with a per-collection SAS token that is fetched when a
+  URL is used. A scene keeps the catalog's own unsigned href — that is what its
+  `scene_key` and its cached row are built from — so no token reaches the scene
+  cache or a workspace file, and a scene found yesterday still downloads today.
+- **Vector toolbox** — a GeoPackage is read layer by layer: `list_layers` names
+  what a container holds, and `read_vector`/`export_vector` take a `layer` to pick
+  one. The analysis tools mirror GeoLibre's own vector toolbox, so the same
+  operation produces the same result here as in the app: buffer (optionally
+  dissolved), clip, dissolve, overlay (intersection / difference / union),
+  spatial and attribute joins, select by value or by location, aggregate by
+  attribute, centroids, convex hull and bounding box, simplify, explode, Voronoi
+  and Delaunay diagrams, regular grids (rectangle or hexagon), points along
+  lines, and `check_geometry`/`fix_geometry` for invalid geometry. Units are
+  stated per tool: buffer measures in meters through a local UTM projection,
+  while simplify's tolerance, points_along's interval, and a grid's cell size are
+  in layer units (degrees for `EPSG:4326`).
+- **Rasters land on the map as COGs** — the embedded app loads a Cloud-Optimized
+  GeoTIFF, and a striped one is handed to its Python sidecar converter, which this
+  harness does not run. `add_raster` therefore converts a local GeoTIFF to a COG
+  copy in `results/` (`<name>_cog.tif`, written with rasterio's COG driver), reports
+  it as its own progress cell, records it in the outputs manifest, and loads
+  that copy, recording both paths in the layer metadata; a file that is already a
+  COG is left alone. The tools that produce map-facing products — `spectral_index`,
+  `slope`, `aspect`, `hillshade`, `rescale`, `compose_rgb` — write COGs directly.
+- **Raster analysis** — beyond clip/reproject/rescale, the raster pack derives
+  products in one call each: `spectral_index` (NDVI, GNDVI, NDWI, NDMI, NDBI,
+  NBR, EVI, SAVI) reading either band numbers of one file or per-band COGs the
+  catalogs publish, `zonal_stats` (a band summarized per zone polygon, joined
+  back onto the zones), `hillshade`/`slope`/`aspect` (a DEM, with a geographic
+  raster's spacing converted to meters), `polygonize` (a classified raster to
+  polygons), and `compose_rgb` (three single-band bands stacked into one colour
+  file, which is what makes a per-band sensor like Landsat render in colour).
+  `contour` turns a continuous surface into isolines (a DEM into 10 m contours,
+  with a pixel tolerance for the marching-squares stair-steps). `add_raster` takes
+  `bands` to choose what is drawn, and `add_heatmap` renders a point layer as a
+  density surface. Rasters can be read straight from a remote
+  COG URL: `clip`, `raster_info`, `raster_stats`, and `sample_point` go through
+  GDAL's HTTP range reads, so clipping a catalog scene to a town-sized window
+  fetches a few megabytes instead of the whole ~200 MB band (tools that must read
+  every pixel refuse a remote source above 50 M pixels and ask for a clip).
+  `clip` takes longitude/latitude bounds like every other tool and converts them
+  into a projected raster's CRS, so a UTM satellite tile is clipped with the same
+  AOI the rest of the harness speaks. `swipe_compare` sets up GeoLibre's swipe
+  control between two layers (or a layer and `__basemap__`) for before/after
+  comparison.
 
 ## Package layout
 
@@ -173,11 +225,22 @@ workspace.json   manifest (outputs + version)
 
 ## Notes
 
-- `gdal_translate` (the osgeo escape hatch) requires the `gdal` package, which has
-  no Windows wheels; all other raster tools are rasterio-based and work without it.
+- `gdal_translate` copies a raster with GDAL creation options (`TILED=YES`,
+  `COMPRESS=ZSTD`, `PREDICTOR=2`, `BIGTIFF=YES`, `driver=COG`) — the settings no
+  other tool exposes. It goes through `rasterio.shutil.copy`, i.e. the GDAL rasterio
+  bundles (3.10.3), so nothing extra is needed: the `gdal` PyPI package (the `osgeo`
+  bindings) publishes **no wheels on any platform** and is not used here. Arguments
+  that are not creation options (subsetting, resizing, rescaling, pixel types) are
+  refused with the tool that does that job, rather than silently ignored by GDAL.
+- `raster_info` reports `cog`: whether a file is readable as a Cloud-Optimized
+  GeoTIFF, which is what the embedded map needs. COG validation and creation are
+  also available to generated code through `rio-cogeo`.
 - `run_python` runs in the kernel process behind a cooperative AST guard: the
-  geospatial stack and basic stdlib are importable, while subprocess, network,
-  dynamic execution, and raw command calls are rejected. Snippets run with the
+  geospatial stack and basic stdlib are importable — including scikit-image,
+  scipy, tifffile, and PIL, so image processing (filters, morphology,
+  segmentation, texture, blob detection) is available to generated code without a
+  dedicated tool — while subprocess, network, dynamic execution, and raw command
+  calls are rejected. Snippets run with the
   working directory at the active workspace root, so a relative path means the
   same thing inside a snippet as it does in every other tool (`data/x` is
   `<workspace>/data/x`); snippets are serialized while they hold that directory.

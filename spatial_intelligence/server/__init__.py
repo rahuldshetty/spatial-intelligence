@@ -40,6 +40,11 @@ def run() -> None:
             "set GEOAI_PORT to another port and start again."
         )
     ensure_frontend_assets()
+    # Before the browser opens, so the first thing an operator sees is what is
+    # about to serve: banner first, then the metadata blocks.
+    from .banner import announce
+
+    announce()
     _open_browser(f"http://127.0.0.1:{port}/")
     import uvicorn
 

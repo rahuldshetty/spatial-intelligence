@@ -41,25 +41,98 @@ CAPABILITIES: tuple[Capability, ...] = (
         id="map.layers",
         title="Map layers and styling",
         summary="Add and style raster, vector, tile, and WMS layers.",
-        keywords=("map", "plot", "display", "layer", "style", "raster", "vector"),
+        keywords=(
+            "map", "plot", "display", "layer", "style", "raster", "vector",
+            "heatmap", "density", "swipe", "compare", "before", "after",
+        ),
         implementation="backend+geolibre",
-        tools=("add_raster", "add_vector", "add_geojson", "style_layer", "fit_bounds"),
+        tools=(
+            "add_raster",
+            "add_vector",
+            "add_vector_to_map",
+            "add_geojson",
+            "add_heatmap",
+            "swipe_compare",
+            "style_layer",
+            "fit_bounds",
+        ),
     ),
     Capability(
         id="raster.processing",
         title="Raster processing",
-        summary="Inspect, clip, reproject, rescale, calculate bands, and create COGs.",
-        keywords=("raster", "imagery", "satellite", "clip", "reproject", "cog", "band"),
+        summary=(
+            "Inspect and derive rasters: clip, reproject, rescale, spectral indices, "
+            "zonal statistics, terrain (hillshade/slope/aspect), vectorize, and COGs."
+        ),
+        keywords=(
+            "raster", "imagery", "satellite", "clip", "reproject", "cog", "band",
+            "ndvi", "index", "zonal", "statistics", "hillshade", "slope", "aspect",
+            "terrain", "dem", "elevation", "polygonize", "vectorize", "composite", "stretch",
+            "remote", "url", "cog", "window", "subset", "contour", "isolines",
+            "skimage", "filter", "morphology", "segmentation",
+        ),
         implementation="backend",
-        tools=("raster_info", "clip", "reproject", "rescale", "band_math", "to_cog"),
+        tools=(
+            "raster_info",
+            "raster_stats",
+            "clip",
+            "reproject",
+            "rescale",
+            "band_math",
+            "to_cog",
+            "spectral_index",
+            "zonal_stats",
+            "hillshade",
+            "slope",
+            "aspect",
+            "polygonize",
+            "contour",
+            "compose_rgb",
+            "gdal_translate",
+            "sample_point",
+        ),
     ),
     Capability(
         id="vector.processing",
         title="Vector processing",
-        summary="Inspect, reproject, buffer, clip, and export vector datasets.",
-        keywords=("vector", "building", "road", "polygon", "buffer", "geojson"),
+        summary=(
+            "Inspect and analyze vector data: layers in a GeoPackage, buffer, clip, "
+            "dissolve, overlay, joins, selection, aggregation, grids, and topology repair."
+        ),
+        keywords=(
+            "vector", "building", "road", "parcel", "polygon", "point", "line",
+            "buffer", "clip", "dissolve", "overlay", "intersect", "union", "difference",
+            "join", "select", "filter", "aggregate", "count", "sum", "grid", "hexagon",
+            "voronoi", "centroid", "hull", "simplify", "geojson", "geopackage", "gpkg",
+            "shapefile", "attribute", "topology", "invalid", "geometry",
+        ),
         implementation="backend",
-        tools=("read_vector", "reproject_vector", "buffer", "clip_vector", "to_geojson"),
+        tools=(
+            "list_layers",
+            "read_vector",
+            "check_geometry",
+            "fix_geometry",
+            "reproject_vector",
+            "buffer",
+            "clip_vector",
+            "dissolve",
+            "overlay",
+            "spatial_join",
+            "attribute_join",
+            "select_by_value",
+            "select_by_location",
+            "aggregate",
+            "centroids",
+            "convex_hull",
+            "bounding_box",
+            "simplify",
+            "explode",
+            "voronoi",
+            "points_along",
+            "grid",
+            "export_vector",
+            "add_heatmap",
+        ),
     ),
     Capability(
         id="python.execution",
@@ -95,37 +168,66 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="available",
     ),
     Capability(
+        id="catalog.satellite-imagery",
+        title="Satellite imagery and elevation catalogs (STAC)",
+        summary="Search Sentinel, Landsat, NAIP, Sentinel-1, and DEM collections, then download and map the best scene.",
+        keywords=(
+            "satellite", "sentinel", "landsat", "naip", "hls", "dem", "elevation",
+            "stac", "catalog", "imagery", "reflectance", "ndvi", "sar", "multispectral",
+        ),
+        implementation="backend using the public STAC APIs GeoLibre's STAC panel browses",
+        tools=(
+            "list_stac_catalogs",
+            "search_stac_collections",
+            "search_stac_scenes",
+            "add_catalog_scene",
+            "download_catalog_scene",
+        ),
+        geolibre_plugins=("STAC Catalogs", "Planetary Computer"),
+        status="available",
+    ),
+    Capability(
         id="catalog.planet-stac",
-        title="Planet Open Data and generic STAC",
-        summary="Discover Planet disaster releases or another STAC catalog.",
-        keywords=("disaster", "planet", "stac", "satellite", "catalog", "imagery"),
+        title="Planet Open Data and other STAC APIs",
+        summary="Discover Planet disaster releases, or reach a STAC API this build does not name.",
+        keywords=("disaster", "planet", "stac", "catalog", "release"),
         implementation="geolibre-plugin",
         geolibre_plugins=(
             "Planet Open Data",
             "STAC Catalogs",
         ),
         status="interactive_handoff",
-        fallback="Open the matching GeoLibre Web Services panel, add selected scenes, then continue from the persisted map layers.",
+        fallback=(
+            "Discovery of Planet's disaster releases is a GeoLibre panel, not a call "
+            "this build can make: open the STAC Catalogs panel (Planet Open Data is "
+            "the same panel pinned to Planet's releases), add the scenes you want, "
+            "then continue from the persisted map layers. Once a release or any other "
+            "catalog publishes a STAC API URL, pass it to search_stac_scenes instead."
+        ),
     ),
     Capability(
         id="map.compare",
         title="Before/after comparison",
-        summary="Compare two map layers using GeoLibre's Swipe plugin.",
+        summary=(
+            "Compare two map layers side by side through GeoLibre's Swipe plugin, "
+            "including a layer against the basemap itself."
+        ),
         keywords=("compare", "comparison", "before", "after", "swipe", "change"),
-        implementation="geolibre-plugin",
+        implementation="backend+geolibre",
         geolibre_plugins=("Swipe",),
-        status="interactive_handoff",
-        fallback="Open the GeoLibre Swipe plugin and select the two persisted layers.",
+        tools=("swipe_compare",),
     ),
     Capability(
         id="map.terrain",
-        title="3D terrain",
-        summary="Explore elevation and imagery in GeoLibre's terrain view.",
-        keywords=("terrain", "elevation", "dem", "3d", "slope", "landslide"),
-        implementation="geolibre-plugin",
+        title="Terrain and elevation",
+        summary=(
+            "Derive relief from a DEM (hillshade, slope, aspect) and explore it with "
+            "imagery in GeoLibre's terrain view."
+        ),
+        keywords=("terrain", "elevation", "dem", "3d", "slope", "aspect", "hillshade", "landslide"),
+        implementation="backend+geolibre",
         geolibre_plugins=("Terrain",),
-        status="interactive_handoff",
-        fallback="Enable GeoLibre's Terrain control after adding imagery.",
+        tools=("hillshade", "slope", "aspect"),
     ),
     Capability(
         id="catalog.overture",

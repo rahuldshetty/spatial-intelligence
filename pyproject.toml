@@ -20,6 +20,16 @@ dependencies = [
   "pyogrio",
   "shapely",
   "pyproj",
+  # Image processing: the sandbox exposes these to run_python, and the contour
+  # tool is built on skimage.measure. scipy arrives with skimage and is listed
+  # because generated snippets use it directly.
+  "scikit-image",
+  "scipy",
+  # COG creation and validation for run_python, like the two above it: the app
+  # imports it at startup to expose it to generated code. It is deliberately not
+  # what decides whether the map can load a raster (that check is structural,
+  # rasterio-only, in geo.raster.looks_cog).
+  "rio-cogeo",
   "numpy",
   "pandas",
   "fastapi",
@@ -28,8 +38,10 @@ dependencies = [
   "geolibre==2.9.0",
 ]
 
-[project.optional-dependencies]
-gdal = ["gdal"]
+# The `gdal` package (the `osgeo` bindings) is deliberately absent: it publishes no
+# wheels on any platform, so installing it means compiling against a GDAL C library
+# that is not present — and nothing here uses it. GDAL itself ships inside rasterio
+# (3.10.3), which is what `gdal_translate` drives.
 
 [project.scripts]
 spatial-intelligence = "spatial_intelligence.server:run"

@@ -11,6 +11,7 @@ namespaced ``metadata.geoai`` keys are unchanged so existing notebooks load.
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 from ..contracts.ids import new_id
@@ -215,6 +216,32 @@ def nb_to_cell(nb_cell: dict) -> dict:
     return cell
 
 
+#: Attempts and delay for :func:`_replace_with_retry`.
+_REPLACE_ATTEMPTS = 6
+_REPLACE_DELAY = 0.02
+
+
+def _replace_with_retry(source: Path, target: Path) -> None:
+    """Rename ``source`` over ``target``, retrying a transient Windows refusal.
+
+    ``os.replace`` is atomic, but Windows still refuses it with
+    ``PermissionError`` while another handle has the destination open without
+    delete sharing — most often a reader that arrived microseconds earlier. A few
+    short retries cover that window, and the reader keeps the guarantee that it
+    sees either the old file or the new one.
+    """
+    import time
+
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            source.replace(target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_DELAY)
+
+
 def read_nb(path: Path) -> list[dict]:
     """Load cells from ``path``; a missing file yields ``[]``."""
     if not path.exists():
@@ -224,7 +251,14 @@ def read_nb(path: Path) -> list[dict]:
 
 
 def write_nb(path: Path, cells: list[dict]) -> None:
-    """Write ``cells`` as an nbformat 4.5 JSON notebook (mkdir parents)."""
+    """Write ``cells`` as an nbformat 4.5 JSON notebook (mkdir parents).
+
+    Written to a temporary sibling and then renamed over the target, so a reader
+    (the browser reloading the Cells tab, a test asserting on the document) sees
+    either the previous notebook or the complete new one. Writing in place let a
+    reader catch a truncated file, which parsed as an empty document and failed
+    as a JSON error rather than as a notebook.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     nb = {
         "cells": [cell_to_nb(c) for c in cells],
@@ -232,4 +266,11 @@ def write_nb(path: Path, cells: list[dict]) -> None:
         "nbformat": _NBFORMAT,
         "nbformat_minor": _NBFORMAT_MINOR,
     }
-    path.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    payload = json.dumps(nb, indent=1, ensure_ascii=False) + "\n"
+    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        _replace_with_retry(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise

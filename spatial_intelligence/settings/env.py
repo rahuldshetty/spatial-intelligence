@@ -190,4 +190,39 @@ def load_env() -> None:
             file=sys.stderr,
         )
         return
-    load_dotenv(app_root() / ".env")
+    path = app_root() / ".env"
+    shadowed = _shadowed_keys(path)
+    load_dotenv(path)
+    if shadowed:
+        # Silent shadowing is the confusing case: the file says one thing, the
+        # process environment says another, and the process wins.
+        print(
+            "spatial-intelligence: these variables are already set in the "
+            f"environment, so the values in {path} are ignored: "
+            + ", ".join(sorted(shadowed)),
+            file=sys.stderr,
+        )
+
+
+def _shadowed_keys(path: Path) -> set[str]:
+    """Return the keys ``path`` sets that the environment already defines.
+
+    Only names with a *different* value count: an identical value shadowing
+    itself is not worth reporting.
+    """
+    if not path.is_file():
+        return set()
+    shadowed: set[str] = set()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+    for line in lines:
+        name, separator, value = line.partition("=")
+        name = name.strip()
+        if not separator or not name or name.startswith("#"):
+            continue
+        current = os.environ.get(name)
+        if current is not None and current != value.strip().strip("\"'"):
+            shadowed.add(name)
+    return shadowed

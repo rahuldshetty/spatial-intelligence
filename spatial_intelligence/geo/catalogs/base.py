@@ -25,16 +25,21 @@ SEARCH_STOP_WORDS = frozenset(
 _USER_AGENT = "spatial-intelligence/0.1 catalog-client"
 
 
-def fetch_json(url: str, *, timeout: float = 30.0) -> dict:
-    """Fetch one catalog JSON object over HTTPS, capped at 20 MiB.
-
-    The transport is resolved at call time (``urllib.request.urlopen``), so a
-    test or a future transport can substitute it without touching callers.
-    """
+def _request(url: str, *, payload: dict | None = None) -> urllib.request.Request:
+    """Build an HTTPS request for a catalog call, rejecting other schemes."""
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise ToolInputError("catalog URLs must use HTTPS")
-    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    headers = {"User-Agent": _USER_AGENT}
+    data: bytes | None = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode("utf-8")
+    return urllib.request.Request(url, data=data, headers=headers)
+
+
+def _read_json(request: urllib.request.Request, timeout: float) -> dict:
+    """Run one request and decode a size-capped JSON object from the response."""
     with urllib.request.urlopen(request, timeout=timeout) as response:
         length = response.headers.get("Content-Length")
         if length and int(length) > MAX_JSON_BYTES:
@@ -46,6 +51,43 @@ def fetch_json(url: str, *, timeout: float = 30.0) -> dict:
     if not isinstance(value, dict):
         raise ToolInputError("catalog response must be a JSON object")
     return value
+
+
+def bbox_intersects(item_bbox: Any, bounds: list[float] | None) -> bool:
+    """Whether an item's bbox overlaps the query bounds (unknown bbox: yes)."""
+    if bounds is None or not isinstance(item_bbox, list) or len(item_bbox) < 4:
+        return True
+    try:
+        west, south, east, north = (float(value) for value in item_bbox[:4])
+    except (TypeError, ValueError):
+        # A provider can publish a null or a string where a number belongs; that
+        # item is not worth failing a whole multi-page search over.
+        return True
+    query_west, query_south, query_east, query_north = bounds
+    return (
+        west <= query_east
+        and east >= query_west
+        and south <= query_north
+        and north >= query_south
+    )
+
+
+def fetch_json(url: str, *, timeout: float = 30.0) -> dict:
+    """Fetch one catalog JSON object over HTTPS, capped at 20 MiB.
+
+    The transport is resolved at call time (``urllib.request.urlopen``), so a
+    test or a future transport can substitute it without touching callers.
+    """
+    return _read_json(_request(url), timeout)
+
+
+def post_json(url: str, payload: dict, *, timeout: float = 30.0) -> dict:
+    """POST a JSON body and read a JSON object back, under the same caps.
+
+    STAC item search is a POST, so the HTTPS-only rule and the 20 MiB limit are
+    shared with :func:`fetch_json` rather than restated.
+    """
+    return _read_json(_request(url, payload=payload), timeout)
 
 
 def links(document: dict, rel: str) -> list[dict]:
@@ -82,10 +124,12 @@ def search_terms(text: str) -> set[str]:
 
 
 __all__ = [
+    "bbox_intersects",
     "MAX_JSON_BYTES",
     "SEARCH_STOP_WORDS",
     "event_id",
     "fetch_json",
     "links",
+    "post_json",
     "search_terms",
 ]

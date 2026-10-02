@@ -6,7 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantic_ai import Agent, DeferredToolRequests
-from pydantic_ai.capabilities import ReinjectSystemPrompt
+from pydantic_ai.capabilities import ReinjectSystemPrompt, WebSearch
+from pydantic_ai.models import Model
 from pydantic_ai_harness import (
     ClearToolResults,
     Planning,
@@ -16,6 +17,7 @@ from pydantic_ai_harness import (
 from pydantic_ai_harness.planning import InMemoryPlanStore
 
 from ..tools.registry import ToolRegistry
+from ..websearch import web_search
 from .capabilities import NormalizeDuplicateToolNames, ToolFailurePolicy
 from .model import resolve_model
 from .prompt import SYSTEM_PROMPT
@@ -39,7 +41,7 @@ class BuiltAgent:
 
 def build_agent(
     registry: ToolRegistry,
-    model: str | Callable[[], str],
+    model: str | Model | Callable[[], str],
     *,
     tool_retries: int = TOOL_RETRIES,
 ) -> BuiltAgent:
@@ -47,8 +49,9 @@ def build_agent(
 
     ``registry`` supplies both the tools and their metadata (core visibility,
     approval, timeouts, sequencing); nothing about a tool is restated here.
-    ``model`` may be a model string or a zero-argument callable returning one,
-    so a settings change can be picked up without rebuilding this function.
+    ``model`` may be a model string, a ready-made ``Model``, or a zero-argument
+    callable returning a string, so a settings change can be picked up without
+    rebuilding this function.
     """
     plan_store = InMemoryPlanStore()
     agent: Agent = Agent(
@@ -58,6 +61,11 @@ def build_agent(
         retries={"tools": tool_retries},
         capabilities=[
             ReinjectSystemPrompt(),
+            # Provider-native web search where the model has one, the local
+            # DuckDuckGo client otherwise. The configured DeepSeek endpoint has
+            # no native search, so ``web_search`` is what actually runs; the
+            # local tool is dropped from the wire on a model that does.
+            WebSearch(local=web_search),
             Planning(store=plan_store),
             NormalizeDuplicateToolNames(),
             ToolFailurePolicy(),

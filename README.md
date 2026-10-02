@@ -129,6 +129,13 @@ routes, and the web components.
   URL is used. A scene keeps the catalog's own unsigned href — that is what its
   `scene_key` and its cached row are built from — so no token reaches the scene
   cache or a workspace file, and a scene found yesterday still downloads today.
+- **Web search** — `web_search` looks up what no dataset tool covers: library and
+  API documentation, a provider's terms or endpoints, what an error message
+  means, or a place name. It is the agent's `WebSearch` capability: a model with
+  a provider-native web search uses that, and every other model — including the
+  shipped DeepSeek/OpenAI-compatible endpoint — falls back to a local DuckDuckGo
+  client (no API key, no extra dependency). Results are titles, URLs, and
+  snippets; the agent opens a promising URL with `download` before relying on it.
 - **Vector toolbox** — a GeoPackage is read layer by layer: `list_layers` names
   what a container holds, and `read_vector`/`export_vector` take a `layer` to pick
   one. The analysis tools mirror GeoLibre's own vector toolbox, so the same
@@ -180,6 +187,7 @@ spatial_intelligence/
   workspace/      the workspace tree, notebook document, run traces, file I/O
   map/            the live GeoLibre document, snapshots, the style model, the iframe bridge
   geo/            rasterio and GeoPandas services, open-data catalog clients
+  websearch.py    the local DuckDuckGo client behind the agent's web_search tool
   pythonruntime/  the run_python sandbox, output store, and API help
   tools/          the tool registry (@tool/@pack), the runtime, and the packs
   agent/          prompt, model resolution, run loop, interaction protocol

@@ -14,7 +14,7 @@ about them.
 
 from __future__ import annotations
 
-from ..contracts.effects import READ_ONLY
+from ..contracts.effects import READ_ONLY, Effect
 from .packs.capabilities import CapabilityPack
 from .packs.catalog import CatalogPack
 from .packs.files import FilesPack
@@ -52,6 +52,11 @@ PLAN_MUTATION_NAMES: frozenset[str] = frozenset(
 
 #: The function tool the auto-injected tool-search capability exposes locally.
 TOOL_SEARCH_NAME = "search_tools"
+
+#: The local function tool the ``WebSearch`` capability falls back to. The
+#: capability registers the implementation on the agent; this name only
+#: classifies it here (replay-safety, discovery, category).
+WEB_SEARCH_NAME = "web_search"
 
 _PLAN_SUMMARIES = {
     "write_plan": "Create or replace the task plan (whole-list replacement).",
@@ -110,4 +115,12 @@ def register_external_tools(registry: ToolRegistry) -> list[str]:
         effects=READ_ONLY,
     )
     added.append(TOOL_SEARCH_NAME)
+    registry.add_external(
+        WEB_SEARCH_NAME,
+        category="web",
+        origin="capability",
+        summary="Search the web for documentation, provider terms, or current facts.",
+        effects=frozenset({Effect.READ, Effect.NETWORK}),
+    )
+    added.append(WEB_SEARCH_NAME)
     return added

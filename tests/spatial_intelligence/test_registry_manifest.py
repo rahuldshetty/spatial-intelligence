@@ -10,6 +10,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.profiles import ModelProfile
+
 from spatial_intelligence import discovery
 from spatial_intelligence.agent.builder import build_agent
 from spatial_intelligence.contracts.effects import Effect
@@ -17,6 +21,7 @@ from spatial_intelligence.tools.build import (
     PLAN_MUTATION_NAMES,
     PLAN_TOOL_NAMES,
     TOOL_SEARCH_NAME,
+    WEB_SEARCH_NAME,
     default_registry,
 )
 from spatial_intelligence.tools.registry import PLAN_MUTATION_TAG
@@ -50,6 +55,7 @@ EXPECTED_CATEGORY_COUNTS = {
     "raster": 17,
     "search": 1,
     "vector": 25,
+    "web": 1,
 }
 
 
@@ -68,7 +74,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 93)
+        self.assertEqual(len(self.registry), 94)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -108,6 +114,16 @@ class ManifestTests(ManifestTestCase):
         spec = self.registry.get(TOOL_SEARCH_NAME)
         self.assertEqual(spec.origin, "toolsearch")
         self.assertEqual(spec.effects, frozenset({Effect.READ}))
+        self.assertFalse(spec.implemented)
+
+    def test_web_search_is_classified_as_a_network_read(self):
+        # The WebSearch capability registers the implementation, so the spec is
+        # declarative: it exists for replay-safety and discovery only.
+        spec = self.registry.get(WEB_SEARCH_NAME)
+        self.assertEqual(spec.category, "web")
+        self.assertEqual(spec.origin, "capability")
+        self.assertEqual(spec.effects, frozenset({Effect.READ, Effect.NETWORK}))
+        self.assertTrue(spec.replay_safe)
         self.assertFalse(spec.implemented)
 
     def test_implemented_tools_exclude_foreign_ones(self):
@@ -233,6 +249,7 @@ EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "add_catalog_scene",
         "download_catalog_scene",
     ),
+    "web.search": ("web_search",),
     "catalog.planet-stac": (),
     "map.compare": (
         "swipe_compare",
@@ -296,6 +313,25 @@ class BuildTests(ManifestTestCase):
 
         self.assertIsNotNone(built.agent)
         self.assertIsNotNone(built.plan_store)
+
+    def test_web_search_reaches_a_model_without_native_search(self):
+        # The WebSearch capability is provider-adaptive; on a model that has no
+        # native tool (the shipped DeepSeek/OpenAI-compatible endpoint's profile
+        # is ``supported_native_tools=frozenset()``) the local DuckDuckGo
+        # function must be the tool the model is offered.
+        seen: list[str] = []
+
+        def respond(messages, info: AgentInfo) -> ModelResponse:
+            seen.extend(tool.name for tool in info.function_tools)
+            return ModelResponse(parts=[TextPart("ok")])
+
+        model = FunctionModel(
+            respond, profile=ModelProfile(supported_native_tools=frozenset())
+        )
+        built = build_agent(self.registry, model)
+        built.agent.run_sync("what does STAC mean?")
+
+        self.assertIn(WEB_SEARCH_NAME, seen)
 
     def test_the_runtime_carries_the_registry_for_pack_lookups(self):
         from spatial_intelligence.session.services import REGISTRY_SERVICE

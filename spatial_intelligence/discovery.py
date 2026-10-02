@@ -187,6 +187,20 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="available",
     ),
     Capability(
+        id="web.search",
+        title="Web search",
+        summary=(
+            "Search the web for documentation, a provider's terms or endpoints, "
+            "or current facts no dataset tool covers."
+        ),
+        keywords=(
+            "web", "search", "internet", "online", "documentation", "docs",
+            "api", "reference", "lookup", "current", "news", "website",
+        ),
+        implementation="backend (the agent's WebSearch capability, DuckDuckGo locally)",
+        tools=("web_search",),
+    ),
+    Capability(
         id="catalog.planet-stac",
         title="Planet Open Data and other STAC APIs",
         summary="Discover Planet disaster releases, or reach a STAC API this build does not name.",

@@ -15,6 +15,7 @@ about them.
 from __future__ import annotations
 
 from ..contracts.effects import READ_ONLY, Effect
+from .packs.ai import AIPack
 from .packs.capabilities import CapabilityPack
 from .packs.catalog import CatalogPack
 from .packs.files import FilesPack
@@ -88,6 +89,7 @@ def default_registry(runtime: ToolRuntime) -> ToolRegistry:
     # Processing.
     registry.add_pack(RasterPack, runtime)
     registry.add_pack(VectorPack, runtime)
+    registry.add_pack(AIPack, runtime)
     registry.add_pack(PythonPack, runtime)
     register_external_tools(registry)
     return registry

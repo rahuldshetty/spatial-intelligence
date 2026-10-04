@@ -43,6 +43,13 @@ dependencies = [
 # that is not present — and nothing here uses it. GDAL itself ships inside rasterio
 # (3.10.3), which is what `gdal_translate` drives.
 
+[project.optional-dependencies]
+# Local AI models (segment_image and friends). An extra, not a dependency: a
+# workspace that only maps and analyses rasters should not pay 50 MB for it.
+# `onnxruntime-gpu` installs the same import on a CUDA machine, so it is the
+# alternative to name here, never both at once.
+ai = ["onnxruntime>=1.20"]
+
 [project.scripts]
 spatial-intelligence = "spatial_intelligence.server:run"
 

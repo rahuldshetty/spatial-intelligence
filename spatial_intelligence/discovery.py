@@ -135,6 +135,22 @@ CAPABILITIES: tuple[Capability, ...] = (
         ),
     ),
     Capability(
+        id="imagery.segmentation",
+        title="Local AI segmentation and object boundaries",
+        summary=(
+            "Segment a raster on this machine with a local SAM-family model: "
+            "object boundaries, fields, water, buildings, cloud — from a point "
+            "grid or from point/box prompts."
+        ),
+        keywords=(
+            "segment", "segmentation", "mask", "boundary", "boundaries", "detect",
+            "detection", "object", "objects", "building", "buildings", "tree",
+            "water", "field", "sam", "ai", "model", "onnx", "instance",
+        ),
+        implementation="backend (ONNX Runtime, models cached under .models)",
+        tools=("ai_models", "ai_pull_model", "ai_unload_model", "segment_image"),
+    ),
+    Capability(
         id="python.execution",
         title="Python sandbox",
         summary="Run Python snippets for data processing (pandas, geopandas, rasterio, …) and page the output.",

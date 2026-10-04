@@ -127,6 +127,53 @@ def max_retries() -> int:
         return 5
 
 
+def models_dir() -> Path:
+    """Return the local model cache root.
+
+    ``GEOAI_MODELS_DIR`` wins; otherwise models live beside the other app data
+    at ``<GEOAI_HOME>/.models``, which in a dev checkout is the repo root. The
+    directory is created lazily by the store, never by this function.
+    """
+    override = os.getenv("GEOAI_MODELS_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return app_root() / ".models"
+
+
+def model_cache_size() -> int:
+    """Return how many models may stay in memory at once (default 2, min 1)."""
+    raw = os.getenv("GEOAI_MODEL_CACHE_SIZE", "2").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 2
+
+
+def model_ttl() -> float:
+    """Return the idle seconds after which a loaded model may be dropped."""
+    raw = os.getenv("GEOAI_MODEL_TTL", "300").strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 300.0
+
+
+def onnx_threads() -> int:
+    """Return the ONNX Runtime intra-op thread count.
+
+    Defaults to one thread per core up to four: ONNX Runtime scales well to
+    that point on the CPUs a desktop app runs on, and past it the encoder is
+    memory-bound while a fully loaded machine hurts everything else.
+    """
+    raw = os.getenv("GEOAI_ONNX_THREADS", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return max(1, min(4, (os.cpu_count() or 2) - 1))
+
+
 def resolve_workspace_name(override: str | None = None) -> str:
     """Resolve the active workspace name.
 

@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from ..agent.builder import BuiltAgent, build_agent
+from ..ai.manager import MANAGER_SERVICE
 from ..contracts.errors import RuntimeNotBoundError
 from ..settings.env import server_base_url
 from ..tools.build import default_registry
@@ -142,7 +143,16 @@ class SessionServices:
         return runtime
 
     def unbind(self) -> None:
-        """Forget the runtime, registry, and agent."""
+        """Forget the runtime, registry, and agent, and free loaded models."""
+        runtime = self._runtime
+        if runtime is not None:
+            manager = runtime.services.get(MANAGER_SERVICE)
+            if manager is not None:
+                # A loaded model is tens of megabytes of session; dropping the
+                # runtime without closing it would keep that alive until the
+                # process ends, which is exactly the leak the manager exists to
+                # prevent.
+                manager.close()
         self._registry = None
         self._runtime = None
         self._built = None

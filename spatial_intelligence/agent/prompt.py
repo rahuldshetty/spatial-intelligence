@@ -41,7 +41,12 @@ Rules:
    converts a non-COG GeoTIFF to a COG copy itself. Derived products are one call
    each (spectral_index, zonal_stats, hillshade/slope/aspect, contour,
    polygonize, compose_rgb) and write results/*.tif. Colormap names come from
-   list_colormaps — "gray" for SAR, "terrain" for elevation.
+   list_colormaps — "gray" for SAR, "terrain" for elevation. For object
+   boundaries or anything the model should find itself, use the local AI models:
+   ai_models lists them, segment_image segments a raster — mode="auto" finds
+   everything, mode="points"/"boxes" take longitude/latitude prompts — and
+   writes results/*.geojson for add_geojson. Model downloads on first
+   use; CPU runs take seconds per tile, so pass bounds on a large scene.
 6. A full satellite band COG is ~200 MB, so clip the scene's asset URL to the
    window you need and analyze that copy: clip, raster_info, raster_stats, and
    sample_point all accept remote COG URLs. Bounds are longitude/latitude

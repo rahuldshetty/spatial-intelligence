@@ -235,3 +235,7 @@ opencode-go.env
 
 
 hack/
+.omp/
+.codex/
+.claude/
+.cursor/

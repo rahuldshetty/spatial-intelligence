@@ -28,8 +28,8 @@ from typing import Any, Iterator
 
 from ..contracts.errors import ToolInputError
 from ..settings import env
-from . import models
-from .models import ModelSpec
+from . import catalog, store
+from .catalog import ModelSpec
 
 #: Providers tried in order; the first one this machine actually has wins.
 #: AzureExecutionProvider is deliberately absent: it is a stub that reports
@@ -131,7 +131,7 @@ class ModelManager:
         model_id: str,
         *,
         download: bool = True,
-        progress: models.ProgressHook | None = None,
+        progress: store.ProgressHook | None = None,
     ) -> Iterator[ModelSession]:
         """Yield a loaded session for ``model_id``, held until the block exits.
 
@@ -139,13 +139,13 @@ class ModelManager:
         :class:`~spatial_intelligence.contracts.errors.ToolInputError` when the
         model is unknown, undownloadable, or onnxruntime is not installed.
         """
-        spec = models.find(model_id)
-        if not models.is_downloaded(spec):
+        spec = catalog.find(model_id)
+        if not store.is_downloaded(spec):
             if not download:
                 raise ToolInputError(
                     f"{spec.id} is not downloaded; call ai_pull_model({spec.id!r}) first"
                 )
-            models.pull(spec, progress=progress)
+            store.pull(spec, progress=progress)
 
         session = self._acquire(spec)
         session.refcount += 1
@@ -205,19 +205,25 @@ class ModelManager:
         options = _session_options()
         providers = _resolve_providers()
         missing = [
-            file.path for file in spec.files if not models.file_path(spec, file).is_file()
+            file.path for file in spec.files if not store.file_path(spec, file).is_file()
         ]
         if missing:
             raise ToolInputError(
                 f"{spec.id} is missing {', '.join(missing)}; call ai_pull_model first"
             )
-        # The catalog is ordered encoder-first; the last entry is the decoder.
-        encoder_file, decoder_file = spec.files[0], spec.files[-1]
+        # The catalog is ordered encoder-first; the last entry is the decoder. A
+        # one-file model is a single graph, so both roles point at it.
+        encoder_file = spec.files[0]
+        decoder_file = spec.files[-1]
         encoder = ort.InferenceSession(
-            str(models.file_path(spec, encoder_file)), sess_options=options, providers=providers
+            str(store.file_path(spec, encoder_file)), sess_options=options, providers=providers
         )
-        decoder = ort.InferenceSession(
-            str(models.file_path(spec, decoder_file)), sess_options=options, providers=providers
+        decoder = (
+            encoder
+            if encoder_file is decoder_file
+            else ort.InferenceSession(
+                str(store.file_path(spec, decoder_file)), sess_options=options, providers=providers
+            )
         )
         now = time.monotonic()
         return ModelSession(
@@ -260,7 +266,7 @@ class ModelManager:
         """Unload one model, or every idle model when ``model_id`` is empty."""
         with self._lock:
             if model_id:
-                spec = models.find(model_id)
+                spec = catalog.find(model_id)
                 session = self._sessions.get(spec.id)
                 if session is None:
                     return {"unloaded": [], "resident": sorted(self._sessions)}
@@ -290,9 +296,9 @@ class ModelManager:
         now = time.monotonic()
         with self._lock:
             rows = []
-            for spec in models.iter_specs(task):
+            for spec in catalog.iter_specs(task):
                 session = self._sessions.get(spec.id)
-                row = models.summary(spec)
+                row = store.summary(spec)
                 row.update(
                     {
                         "loaded": session is not None,

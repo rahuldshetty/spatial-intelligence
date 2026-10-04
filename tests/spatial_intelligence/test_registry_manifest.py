@@ -46,9 +46,10 @@ EXPECTED_CORE = frozenset(
 )
 
 EXPECTED_CATEGORY_COUNTS = {
-    "ai": 4,
+    "ai": 3,
     "capability": 2,
     "catalog": 8,
+    "detection": 1,
     "files": 6,
     "interaction": 1,
     "layers": 23,
@@ -56,6 +57,7 @@ EXPECTED_CATEGORY_COUNTS = {
     "python": 4,
     "raster": 17,
     "search": 1,
+    "segmentation": 1,
     "vector": 25,
     "web": 1,
 }
@@ -76,7 +78,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 98)
+        self.assertEqual(len(self.registry), 99)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -130,7 +132,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 90)
+        self.assertEqual(len(implemented), 91)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)
@@ -168,6 +170,12 @@ class ManifestTests(ManifestTestCase):
 #: silently dropped out of the routing index when the vector tools were expanded.
 #: Changing this dict is how a new tool is advertised, not an accident.
 EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
+    "imagery.detection": (
+        "ai_models",
+        "ai_pull_model",
+        "ai_unload_model",
+        "detect_objects",
+    ),
     "imagery.segmentation": (
         "ai_models",
         "ai_pull_model",

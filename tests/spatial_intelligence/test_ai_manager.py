@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from spatial_intelligence.ai import models
+from spatial_intelligence.ai import catalog, store
 from spatial_intelligence.ai.manager import (
     EMBEDDING_CACHE_SIZE,
     MANAGER_SERVICE,
@@ -39,12 +39,12 @@ class ManagerTestCase(unittest.TestCase):
         )
         self._env.start()
         self.twin = dataclasses.replace(
-            models.SLIMSAM, id=TWIN, repo="example/twin", revision="rev2", files=()
+            catalog.SLIMSAM, id=TWIN, repo="example/twin", revision="rev2", files=()
         )
-        self._catalog = patch.object(models, "MODELS", (models.SLIMSAM, self.twin))
+        self._catalog = patch.object(catalog, "MODELS", (catalog.SLIMSAM, self.twin))
         self._catalog.start()
         self.loads: list[str] = []
-        self._downloaded = patch.object(models, "is_downloaded", lambda spec: True)
+        self._downloaded = patch.object(store, "is_downloaded", lambda spec: True)
         self._downloaded.start()
         self._loader = patch.object(ModelManager, "_load", self._fake_load)
         self._loader.start()
@@ -113,7 +113,7 @@ class ResidencyTests(ManagerTestCase):
         self.assertEqual(manager.loaded_ids(), [TWIN])
 
     def test_embeddings_are_cached_within_a_cap(self):
-        session = self._fake_load(models.find(MODEL))
+        session = self._fake_load(catalog.find(MODEL))
         for index in range(EMBEDDING_CACHE_SIZE + 2):
             session.cache_embedding(f"tile-{index}", index)
 
@@ -197,7 +197,7 @@ class StatusTests(ManagerTestCase):
 class FailureTests(ManagerTestCase):
     def test_an_undownloaded_model_is_named_before_loading(self):
         manager = ModelManager()
-        with patch.object(models, "is_downloaded", lambda spec: False):
+        with patch.object(store, "is_downloaded", lambda spec: False):
             with self.assertRaises(ToolInputError) as caught:
                 with manager.reserve(MODEL, download=False):
                     pass

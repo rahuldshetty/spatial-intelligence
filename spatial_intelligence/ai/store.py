@@ -1,8 +1,4 @@
-"""The local model catalog and the on-disk store that serves it.
-
-One model ships wired up — SlimSAM, the pruned SAM that GeoLibre's own Segment
-Everything panel uses — so the pipeline has a known-good target; adding another
-is a :class:`ModelSpec` entry, not code.
+"""The on-disk model cache, and the fetch that fills it.
 
 Every file lands under::
 
@@ -26,13 +22,13 @@ import hashlib
 import json
 import os
 import shutil
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from ..contracts.errors import ToolInputError
 from ..settings import env
+from .catalog import ModelFile, ModelSpec
 
 #: Where a catalog file is fetched from, given its repo path.
 HUB_BASE_URL = "https://huggingface.co"
@@ -47,78 +43,6 @@ MANIFEST_NAME = ".complete.json"
 
 #: Progress callback: ``(done_bytes, total_bytes, label)``.
 ProgressHook = Callable[[float, float, str], None]
-
-
-@dataclass(frozen=True, slots=True)
-class ModelFile:
-    """One file of a model revision, pinned by hash and size."""
-
-    path: str
-    sha256: str
-    size: int
-
-
-@dataclass(frozen=True, slots=True)
-class ModelSpec:
-    """A model this build knows how to run.
-
-    ``task`` and ``prompts`` are read by the agent-facing tools (what the model
-    is for, what it accepts); ``canvas`` is the square the architecture expects
-    — SAM-family models embed a ``canvas/16`` grid and emit ``canvas/4`` masks,
-    so both the pipeline and the prompt geometry derive from it.
-    """
-
-    id: str
-    repo: str
-    revision: str
-    files: tuple[ModelFile, ...]
-    task: str = "segmentation"
-    prompts: tuple[str, ...] = ("point", "box", "grid")
-    canvas: int = 1024
-    license: str = ""
-    gated: bool = False
-    notes: str = ""
-
-    @property
-    def total_bytes(self) -> int:
-        """Bytes the revision occupies once downloaded."""
-        return sum(file.size for file in self.files)
-
-
-#: SlimSAM-77 uniform (transformers.js ONNX export, apache-2.0): a pruned
-#: ViT-Tiny SAM. ~40 MB, CPU-friendly, and promptable the same way the full SAM
-#: is, which is why it is the default for a first run.
-SLIMSAM = ModelSpec(
-    id="slimsam-77",
-    repo="Xenova/slimsam-77-uniform",
-    revision="69c9d2e880cd421621781e9ded1f0bf1c20e1f74",
-    files=(
-        ModelFile(
-            path="onnx/vision_encoder.onnx",
-            sha256="9f8433273a6750b587779baa0cf5508111001bf7e7acfcf585d370139fd366d0",
-            size=23_276_014,
-        ),
-        ModelFile(
-            path="onnx/prompt_encoder_mask_decoder.onnx",
-            sha256="f4514391764fbd56e08e119060d874ecd7d52994bfb1968af159e12d4943b5bb",
-            size=16_557_892,
-        ),
-    ),
-    license="apache-2.0",
-    notes="Pruned SAM (ViT-Tiny), ONNX, fp32. The default: fastest load, smallest download.",
-)
-
-#: Everything this build can run, best default first.
-MODELS: tuple[ModelSpec, ...] = (SLIMSAM,)
-
-
-def find(model_id: str) -> ModelSpec:
-    """Return the spec for ``model_id``, naming the known ids otherwise."""
-    for spec in MODELS:
-        if spec.id == model_id:
-            return spec
-    known = ", ".join(spec.id for spec in MODELS) or "none"
-    raise ToolInputError(f"unknown model {model_id!r}; available models: {known}")
 
 
 def models_dir() -> Path:
@@ -209,6 +133,12 @@ def _free_bytes(path: Path) -> int:
         return DISK_HEADROOM_BYTES * 2
 
 
+def _present(spec: ModelSpec, file: ModelFile) -> bool:
+    """Whether one catalog file is present at its recorded size."""
+    path = file_path(spec, file)
+    return path.is_file() and path.stat().st_size == file.size
+
+
 def _download(
     spec: ModelSpec,
     file: ModelFile,
@@ -265,6 +195,17 @@ def _download(
             "nothing was written to the model cache"
         )
     os.replace(staging, destination)
+
+
+def _fetch_all(
+    spec: ModelSpec, wanted: list[ModelFile], client: Any, progress: ProgressHook | None
+) -> None:
+    """Fetch the wanted files in catalog order, reporting cumulative bytes."""
+    total = float(sum(file.size for file in wanted)) or 1.0
+    done = 0.0
+    for file in wanted:
+        _download(spec, file, client=client, progress=progress, done=done, total=total)
+        done += file.size
 
 
 def pull(
@@ -330,23 +271,6 @@ def pull(
     }
 
 
-def _present(spec: ModelSpec, file: ModelFile) -> bool:
-    """Whether one catalog file is present at its recorded size."""
-    path = file_path(spec, file)
-    return path.is_file() and path.stat().st_size == file.size
-
-
-def _fetch_all(
-    spec: ModelSpec, wanted: list[ModelFile], client: Any, progress: ProgressHook | None
-) -> None:
-    """Fetch the wanted files in catalog order, reporting cumulative bytes."""
-    total = float(sum(file.size for file in wanted)) or 1.0
-    done = 0.0
-    for file in wanted:
-        _download(spec, file, client=client, progress=progress, done=done, total=total)
-        done += file.size
-
-
 def summary(spec: ModelSpec) -> dict:
     """Return the catalog row for ``spec`` (disk state only, no residency)."""
     present = on_disk_bytes(spec)
@@ -364,23 +288,15 @@ def summary(spec: ModelSpec) -> dict:
     }
 
 
-def iter_specs(task: str | None = None) -> Iterator[ModelSpec]:
-    """Yield every catalog entry, optionally filtered by task."""
-    for spec in MODELS:
-        if task is None or spec.task == task:
-            yield spec
-
-
 __all__ = [
-    "MODELS",
-    "SLIMSAM",
-    "ModelFile",
-    "ModelSpec",
+    "CHUNK_BYTES",
+    "DISK_HEADROOM_BYTES",
+    "HUB_BASE_URL",
+    "MANIFEST_NAME",
+    "ProgressHook",
     "file_path",
-    "find",
     "is_downloaded",
     "is_offline",
-    "iter_specs",
     "manifest_path",
     "models_dir",
     "on_disk_bytes",

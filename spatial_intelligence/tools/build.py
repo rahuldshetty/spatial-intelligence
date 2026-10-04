@@ -18,11 +18,13 @@ from ..contracts.effects import READ_ONLY, Effect
 from .packs.ai import AIPack
 from .packs.capabilities import CapabilityPack
 from .packs.catalog import CatalogPack
+from .packs.detection import DetectionPack
 from .packs.files import FilesPack
 from .packs.interaction import InteractionPack
 from .packs.layers import LayersPack
 from .packs.python_ import PythonPack
 from .packs.raster import RasterPack
+from .packs.segmentation import SegmentationPack
 from .packs.vector import VectorPack
 from .registry import PLAN_MUTATION_TAG, ToolRegistry
 from .runtime import ToolRuntime
@@ -89,7 +91,10 @@ def default_registry(runtime: ToolRuntime) -> ToolRegistry:
     # Processing.
     registry.add_pack(RasterPack, runtime)
     registry.add_pack(VectorPack, runtime)
+    # Local models: the cache and its memory first, then the tasks that use them.
     registry.add_pack(AIPack, runtime)
+    registry.add_pack(SegmentationPack, runtime)
+    registry.add_pack(DetectionPack, runtime)
     registry.add_pack(PythonPack, runtime)
     register_external_tools(registry)
     return registry

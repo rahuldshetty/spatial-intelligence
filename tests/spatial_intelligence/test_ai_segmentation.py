@@ -10,7 +10,8 @@ import numpy as np
 import rasterio
 from rasterio.transform import from_origin
 
-from spatial_intelligence.ai import models, segmentation as seg
+from spatial_intelligence.ai import catalog
+from spatial_intelligence.ai import segmentation as seg
 from spatial_intelligence.ai.manager import EMBEDDING_CACHE_SIZE, ModelSession
 from spatial_intelligence.contracts.errors import ToolInputError
 from spatial_intelligence.workspace import Workspace
@@ -54,7 +55,7 @@ class FakeDecoder:
 def make_session(decoder: FakeDecoder) -> ModelSession:
     """A session with fake ONNX sessions, sharing the real catalog spec."""
     return ModelSession(
-        spec=models.find("slimsam-77"),
+        spec=catalog.find("slimsam-77"),
         encoder=FakeEncoder(),
         decoder=decoder,
         provider="CPUExecutionProvider",
@@ -166,10 +167,10 @@ class TilingTestCase(unittest.TestCase):
     def test_cores_partition_the_raster_exactly_once(self):
         width = height = 2600
         tile, overlap = 1024, 128
-        xs = seg._axis_starts(width, tile, overlap)
-        ys = seg._axis_starts(height, tile, overlap)
-        x_edges = seg._axis_boundaries(xs, tile, width)
-        y_edges = seg._axis_boundaries(ys, tile, height)
+        xs = seg.axis_starts(width, tile, overlap)
+        ys = seg.axis_starts(height, tile, overlap)
+        x_edges = seg.axis_boundaries(xs, tile, width)
+        y_edges = seg.axis_boundaries(ys, tile, height)
 
         covered = np.zeros((height, width), dtype=np.int16)
         for row in range(len(ys)):

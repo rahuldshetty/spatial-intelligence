@@ -151,6 +151,23 @@ CAPABILITIES: tuple[Capability, ...] = (
         tools=("ai_models", "ai_pull_model", "ai_unload_model", "segment_image"),
     ),
     Capability(
+        id="imagery.detection",
+        title="Local object detection (COCO)",
+        summary=(
+            "Find known objects — vehicles, boats, aircraft, people — in aerial and "
+            "drone imagery with a local detector, as labelled boxes. COCO classes "
+            "only, and weak below about a metre per pixel; use segmentation for "
+            "objects the detector has no name for."
+        ),
+        keywords=(
+            "detect", "detection", "object", "objects", "car", "cars", "vehicle",
+            "truck", "boat", "ship", "airplane", "aircraft", "person", "coco",
+            "yolo", "detr", "box", "boxes", "count", "counting", "ai", "model",
+        ),
+        implementation="backend (ONNX Runtime, models cached under .models)",
+        tools=("ai_models", "ai_pull_model", "ai_unload_model", "detect_objects"),
+    ),
+    Capability(
         id="python.execution",
         title="Python sandbox",
         summary="Run Python snippets for data processing (pandas, geopandas, rasterio, …) and page the output.",

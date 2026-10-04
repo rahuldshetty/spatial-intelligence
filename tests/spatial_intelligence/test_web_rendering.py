@@ -544,18 +544,21 @@ class StatusBarRenderingTests(WebRenderingTestCase):
         self.assertIn("$0.01", rendered["text"])
         self.assertIn("50% cached", rendered["text"])
 
-    def test_status_bar_without_usage_shows_only_the_workspace(self):
+    def test_status_bar_without_usage_shows_no_totals(self):
         rendered = self.run_module(
             module_url("components", "status-bar.js"),
             "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
             "state.active_workspace = null;"
             "state.cells = [];"
             "const bar = mod.renderStatusBar();"
-            "return { text: bar.textContent, stats: bar.querySelectorAll('.status-stats').length };",
+            "return { ws: bar.querySelector('.status-ws').textContent,"
+            "  stats: bar.querySelectorAll('.status-stats').length,"
+            "  toggles: bar.querySelectorAll('.follow-toggle').length };",
         )
 
-        self.assertEqual(rendered["text"], "No workspace")
+        self.assertEqual(rendered["ws"], "No workspace")
         self.assertEqual(rendered["stats"], 0)
+        self.assertEqual(rendered["toggles"], 1)
 
     def test_refresh_status_bar_replaces_only_the_status_bar_node(self):
         rendered = self.run_module(
@@ -572,14 +575,16 @@ class StatusBarRenderingTests(WebRenderingTestCase):
             "  replaced: document.getElementById('status-bar') !== bar,"
             "  shellChildren: shell.children.length,"
             "  bars: document.querySelectorAll('#status-bar').length,"
-            "  text: document.getElementById('status-bar').textContent,"
+            "  ws: document.getElementById('status-bar').querySelector('.status-ws').textContent,"
+            "  toggles: document.getElementById('status-bar').querySelectorAll('.follow-toggle').length,"
             "};",
         )
 
         self.assertTrue(rendered["replaced"])
         self.assertEqual(rendered["shellChildren"], 1)
         self.assertEqual(rendered["bars"], 1)
-        self.assertEqual(rendered["text"], "demo")
+        self.assertEqual(rendered["ws"], "demo")
+        self.assertEqual(rendered["toggles"], 1)
 
 
 class DataTabRenderingTests(WebRenderingTestCase):

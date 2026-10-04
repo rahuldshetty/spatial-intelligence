@@ -1,12 +1,14 @@
 /* Status bar: active workspace plus per-session token/cost totals. */
 
 import { el, formatCost, formatTokens } from "../dom.js";
+import { followToggle } from "../scroll.js";
 import { state, usageTotals } from "../store.js";
 
 export function renderStatusBar() {
   const bar = el("div", { id: "status-bar" });
   const ws = el("span", { class: "status-ws", text: state.active_workspace || "No workspace" });
   bar.append(ws);
+  const right = el("div", { class: "status-right" });
   const u = usageTotals();
   if (u.has) {
     const stats = el("div", { class: "status-stats" });
@@ -19,8 +21,10 @@ export function renderStatusBar() {
     if (cost) stats.append(el("span", { class: "stat cost", text: cost }));
     const ratio = u.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
     stats.append(el("span", { class: "stat", title: "Prompt cache hit ratio (DeepSeek)", text: ratio + "% cached" }));
-    bar.append(stats);
+    right.append(stats);
   }
+  right.append(followToggle());
+  bar.append(right);
   return bar;
 }
 

@@ -21,6 +21,8 @@ from pydantic_ai import (
     ModelAPIError,
     ModelHTTPError,
     RunCancelled,
+    UsageLimitExceeded,
+    UsageLimits,
 )
 from pydantic_ai_harness.planning import InMemoryPlanStore, PlanItem
 
@@ -47,6 +49,20 @@ _RETRY_EXHAUSTED = re.compile(
 )
 
 
+#: Phrases a provider uses when it refuses a request for length. Narrow on
+#: purpose: this only decides how a failure is reported.
+CONTEXT_OVERFLOW_HINTS = (
+    "context length",
+    "context_length_exceeded",
+    "maximum context",
+    "max context",
+    "too many tokens",
+    "reduce the length",
+    "input is too long",
+    "prompt is too long",
+)
+
+
 def is_transient_run_error(error: Exception) -> bool:
     """Return whether replaying a workspace/map-safe attempt may succeed."""
     if isinstance(error, ModelHTTPError):
@@ -55,6 +71,16 @@ def is_transient_run_error(error: Exception) -> bool:
         )
     # Non-HTTP ModelAPIError instances represent provider/transport failures.
     return isinstance(error, ModelAPIError)
+
+
+def is_context_overflow_error(error: Exception) -> bool:
+    """Whether the provider refused the request because the history is too long.
+
+    Compaction targets half the window before every request, so a refusal means
+    the window is wrong for this endpoint rather than that nothing tried.
+    """
+    text = str(error).lower()
+    return any(hint in text for hint in CONTEXT_OVERFLOW_HINTS)
 
 
 def describe_run_error(error: Exception, registry: ToolRegistry) -> str:
@@ -244,6 +270,7 @@ class PromptRunner:
 
         prompt = hooks.augment_prompt(source) if resume is None else None
         max_attempts = hooks.settings().get("max_retries", 5)
+        max_requests = hooks.settings().get("max_requests", 200)
         last_error: Exception | None = None
         retry_block_reason: str | None = None
 
@@ -260,10 +287,39 @@ class PromptRunner:
                     event_stream_handler=on_events,
                     cancellation_token=token,
                     run_id=run_id,
+                    usage_limits=UsageLimits(request_limit=max_requests),
                 )
             except RunCancelled:
                 raise
+            except UsageLimitExceeded as exc:
+                # Stop cleanly rather than reporting the run as a failure.
+                stopped = (
+                    f"Stopped after {max_requests} model requests ({exc}). "
+                    "Everything already done was kept. Raise GEOAI_MAX_REQUESTS "
+                    "(or max_requests in settings.json) and run again to continue."
+                )
+                note = {"type": "text", "content": stopped}
+                trace_steps.append(note)
+                if trace_path is not None:
+                    traces.append_step(trace_path, note)
+                hooks.publish_trace(cell_id, note)
+                self._finish_trace(cell_id, status="stopped", error=stopped)
+                return RunOutcome(status="stopped", error=stopped)
             except Exception as exc:  # retry transient provider failures
+                if is_context_overflow_error(exc):
+                    stopped = (
+                        "Stopped: the history no longer fits this model's context window. "
+                        "Set GEOAI_CONTEXT_WINDOW to the window the endpoint really has — "
+                        "compaction targets half of it — or start a new cell to begin with a "
+                        f"shorter history. The work already done was kept. ({exc})"
+                    )
+                    note = {"type": "text", "content": stopped}
+                    trace_steps.append(note)
+                    if trace_path is not None:
+                        traces.append_step(trace_path, note)
+                    hooks.publish_trace(cell_id, note)
+                    self._finish_trace(cell_id, status="stopped", error=stopped)
+                    return RunOutcome(status="stopped", error=stopped)
                 last_error = exc
                 transient = is_transient_run_error(exc)
                 retry_block_reason = (

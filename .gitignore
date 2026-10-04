@@ -165,6 +165,13 @@ venv.bak/
 # Downloaded browser assets (bootstrapped by the server on first start)
 spatial_intelligence/web/vendor/marked.min.js
 
+# Local AI model cache (<GEOAI_HOME>/.models); fetched on demand, never committed
+.models/
+
+# Per-machine skills cache (<GEOAI_HOME>/.skills); the committed trees live in
+# spatial_intelligence/skills/
+.skills/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -232,3 +239,7 @@ opencode-go.env
 
 
 hack/
+.omp/
+.codex/
+.claude/
+.cursor/

@@ -31,6 +31,7 @@ from spatial_intelligence.workspace import Workspace
 #: Routing, interaction, and orientation tools the model always sees.
 EXPECTED_CORE = frozenset(
     {
+        "ai_models",
         "describe_geolibre_bridge",
         "describe_map",
         "describe_tool",
@@ -40,20 +41,25 @@ EXPECTED_CORE = frozenset(
         "read_file",
         "request_user_input",
         "run_python",
+        "skill",
         "write_file",
     }
 )
 
 EXPECTED_CATEGORY_COUNTS = {
+    "ai": 4,
     "capability": 2,
     "catalog": 8,
+    "detection": 1,
     "files": 6,
     "interaction": 1,
-    "layers": 23,
+    "layers": 24,
     "plan": 6,
     "python": 4,
     "raster": 17,
     "search": 1,
+    "segmentation": 1,
+    "skills": 1,
     "vector": 25,
     "web": 1,
 }
@@ -74,7 +80,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 94)
+        self.assertEqual(len(self.registry), 102)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -128,7 +134,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 86)
+        self.assertEqual(len(implemented), 94)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)
@@ -166,6 +172,24 @@ class ManifestTests(ManifestTestCase):
 #: silently dropped out of the routing index when the vector tools were expanded.
 #: Changing this dict is how a new tool is advertised, not an accident.
 EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
+    "ai.sandbox-packages": (
+        "run_python",
+        "skill",
+        "python_help",
+        "ai_fetch_model",
+    ),
+    "imagery.detection": (
+        "ai_models",
+        "ai_pull_model",
+        "ai_unload_model",
+        "detect_objects",
+    ),
+    "imagery.segmentation": (
+        "ai_models",
+        "ai_pull_model",
+        "ai_unload_model",
+        "segment_image",
+    ),
     "workspace.files": (
         "list_files",
         "find_files",
@@ -180,6 +204,7 @@ EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "add_vector_to_map",
         "add_geojson",
         "add_heatmap",
+        "add_basemap",
         "swipe_compare",
         "style_layer",
         "fit_bounds",

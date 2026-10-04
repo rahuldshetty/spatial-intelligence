@@ -2,25 +2,10 @@
 
 import { el, toast } from "../dom.js";
 import { addCell as createCell, updateCell } from "../api.js";
+import { hold, isFollowing, scrollTo } from "../scroll.js";
 import { jobsFor, normalizeCells, setState, state } from "../store.js";
 import { renderCell } from "../components/cell.js";
 import { renderJob } from "../components/progress.js";
-
-let tabScrollTop = 0;
-
-function captureTabScroll() {
-  const content = document.getElementById("tab-content");
-  tabScrollTop = content ? content.scrollTop : 0;
-}
-
-function restoreTabScroll() {
-  const content = document.getElementById("tab-content");
-  if (!content) return;
-  const target = Math.min(tabScrollTop, Math.max(0, content.scrollHeight - content.clientHeight));
-  window.requestAnimationFrame(() => {
-    content.scrollTop = target;
-  });
-}
 
 export function renderAddCellRow() {
   const row = el("div", { class: "add-cell-row" });
@@ -59,14 +44,22 @@ export function renderCellsTab() {
   return wrap;
 }
 
-/** Repaint the cells tab in place, preserving its scroll position. */
+/** Repaint the cells tab in place: follow new content, or hold the reader's place. */
 export function renderCellsOnly() {
   const content = document.getElementById("tab-content");
-  if (content && state.selected_tab === "Cells") {
-    captureTabScroll();
-    content.replaceChildren(renderCellsTab());
-    restoreTabScroll();
+  if (!content || state.selected_tab !== "Cells") return;
+
+  const previous = content.scrollTop;
+  content.replaceChildren(renderCellsTab());
+  if (isFollowing()) {
+    hold();
+    return;
   }
+  // Reading history: keep the reader where they were, clamped to the new height.
+  const limit = Math.max(0, content.scrollHeight - content.clientHeight);
+  window.requestAnimationFrame(() => {
+    scrollTo(content, Math.min(previous, limit));
+  });
 }
 
 /** Swap a markdown cell's rendered body for a textarea that saves on blur. */
@@ -119,7 +112,13 @@ export async function addCell(kind) {
     if (Array.isArray(snap.jobs)) patch.jobs = snap.jobs;
     setState(patch);
     const cell = state.cells.find((candidate) => !before.has(candidate.id));
-    if (cell) focusCell(cell);
+    if (cell) {
+      focusCell(cell);
+      // Adding a cell is an explicit action, so follow it even if the reader
+      // was somewhere else in the history.
+      const follow = panelFollower();
+      if (follow) follow.jump();
+    }
   } catch (e) {
     toast(e.message || String(e));
   }

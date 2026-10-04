@@ -112,20 +112,23 @@ Everything the app writes lives under one data root (see `GEOAI_HOME` in
 
 | Path | Purpose |
 | --- | --- |
-| `~/.local/share/geo-ai/workspaces/` | workspaces (`data/`, `results/`, `maps/`, `traces/`) |
-| `~/.local/share/geo-ai/settings.json` | model, theme, retries, dangerous mode |
-| `~/.local/share/geo-ai/.env` | provider key and model (same schema as `.env.example`) |
+| `~/.local/share/spatial-intelligence/workspaces/` | workspaces (`data/`, `results/`, `maps/`, `traces/`) |
+| `~/.local/share/spatial-intelligence/settings.json` | model, theme, retries, dangerous mode |
+| `~/.local/share/spatial-intelligence/.env` | provider key and model (same schema as `.env.example`) |
 
-The directory name is unchanged from the previous package on purpose: an
-existing installation keeps its workspaces and settings. Only a checkout (a
-`.git` or `workspaces/` next to the package) writes next to the sources, which
-a frozen bundle never is.
+The root was `~/.local/share/geo-ai` before the project was renamed. An
+installation that already has data there keeps using it: the old directory wins
+while it exists and the new one does not, so workspaces and settings survive the
+rename, and a fresh install gets the new name. Only a checkout (a `.git` or
+`workspaces/` next to the package) writes next to the sources, which a frozen
+bundle never is.
 
 Environment overrides (as in the dev checkout): `GEOAI_HOME` (data root),
 `GEOAI_PORT` (default 8000), `GEOAI_NO_BROWSER=1` (headless),
 `GEOAI_MODEL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`.
 
-First run: copy `.env.example` to `~/.local/share/geo-ai/.env` and fill in
+First run: copy `.env.example` to `~/.local/share/spatial-intelligence/.env`
+(`~/.local/share/geo-ai/.env` for an install predating the rename) and fill in
 the provider key — or set the variables in the environment before launching.
 Without `OPENAI_BASE_URL`, opening/creating a workspace fails with a
 provider error ("Set the `OPENAI_API_KEY` environment variable...") until a

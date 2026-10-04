@@ -247,6 +247,35 @@ class LayersPack:
         return result
 
     @tool()
+    def add_basemap(
+        self,
+        basemap: str,
+        name: str | None = None,
+        url: str | None = None,
+        attribution: str | None = None,
+    ) -> dict:
+        """Add a raster basemap (satellite imagery) beneath the other layers.
+
+        ``basemap`` is ``google_satellite``, ``google_hybrid``, or
+        ``esri_world_imagery`` (dashes and spaces accepted too); pass ``url``
+        for any other XYZ tile template. The layer is moved to the bottom of the
+        draw order, so analysis layers stay on top. Use this rather than
+        ``set_basemap`` when the wanted background is raster imagery such as
+        Google satellite: ``set_basemap`` swaps the MapLibre vector style and
+        cannot show it. Returns the new layer's id, name, and URL.
+        """
+        result = layerops.add_basemap(
+            self._rt.workspace,
+            self._map,
+            basemap,
+            name=name,
+            url=url,
+            attribution=attribution,
+        )
+        self._mutated()
+        return result
+
+    @tool()
     def fit_bounds(self, bounds: list[float]) -> dict:
         """Fit the map camera and return confirmation of the resulting view."""
         result = layerops.fit_bounds(self._rt.workspace, self._map, bounds)

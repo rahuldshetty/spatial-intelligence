@@ -723,6 +723,17 @@ const scenarios = {
     const inTrace = progress.renderJob(makeJob({ job_id: "j5", parent_id: "c1" }), "trace");
     const live = progress.renderJob(makeJob({ job_id: "j6" }));
     const updated = progress.updateJob(live, makeJob({ job_id: "j6", status: "done", completed: 4, total: 4 }));
+    const skill = progress.renderJob(makeJob({
+      job_id: "j7",
+      kind: "skill",
+      status: "done",
+      label: "Loaded skill torchgeo/api/models.md",
+      unit: "lines",
+      completed: 124,
+      total: 124,
+      detail: "api/models.md (repo)",
+      parent_id: "c1",
+    }));
     return {
       indeterminate: dump(indeterminate),
       known: dump(known),
@@ -730,6 +741,7 @@ const scenarios = {
       failed: dump(failed),
       in_trace: dump(inTrace),
       updated: dump(updated),
+      skill: dump(skill),
       updated_in_place: updated === live,
     };
   },
@@ -1279,6 +1291,7 @@ class ScenarioCase(unittest.TestCase):
         for name in COMPONENTS:
             shutil.copy2(JS / "components" / f"{name}.js", components / f"{name}.js")
         shutil.copy2(JS / "pages" / "cells.js", pages / "cells.js")
+        shutil.copy2(JS / "scroll.js", cls.root / "js" / "scroll.js")
         shutil.copy2(MARKED, vendor / "marked.min.js")
         (cls.root / "js" / "dom.js").write_text(DOM_STUB, encoding="utf-8")
         (cls.root / "js" / "store.js").write_text(STORE_STUB, encoding="utf-8")
@@ -1392,6 +1405,14 @@ class ProgressTests(ScenarioCase):
         self.assertEqual(self.one(node, cls="download-error")["text"], "boom")
         self.assertEqual(self.one(node, cls="download-status")["text"], "failed")
         self.assertEqual(self.one(node, cls="download-progress-fill")["style"]["width"], "0")
+
+    def test_a_skill_card_names_the_page_it_read(self):
+        node = self.result["skill"]
+        self.assertEqual(self.one(node, cls="badge")["text"], "skill")
+        self.assertEqual(self.one(node, cls="download-filename")["text"], "Loaded skill torchgeo/api/models.md")
+        self.assertEqual(self.one(node, cls="download-description")["text"], "api/models.md (repo)")
+        self.assertEqual(self.one(node, cls="download-progress-label")["text"], "100% · 124 lines")
+        self.assertEqual(self.one(node, cls="download-status")["text"], "complete")
 
     def test_standalone_and_cell_strip_variants(self):
         standalone = self.result["indeterminate"]

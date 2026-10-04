@@ -44,6 +44,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         keywords=(
             "map", "plot", "display", "layer", "style", "raster", "vector",
             "heatmap", "density", "swipe", "compare", "before", "after",
+            "basemap", "background",
         ),
         implementation="backend+geolibre",
         tools=(
@@ -52,6 +53,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "add_vector_to_map",
             "add_geojson",
             "add_heatmap",
+            "add_basemap",
             "swipe_compare",
             "style_layer",
             "fit_bounds",
@@ -133,6 +135,56 @@ CAPABILITIES: tuple[Capability, ...] = (
             "export_vector",
             "add_heatmap",
         ),
+    ),
+    Capability(
+        id="imagery.segmentation",
+        title="Local AI segmentation and object boundaries",
+        summary=(
+            "Segment a raster on this machine with a local SAM-family model: "
+            "object boundaries, fields, water, buildings, cloud — from a point "
+            "grid or from point/box prompts."
+        ),
+        keywords=(
+            "segment", "segmentation", "mask", "boundary", "boundaries", "detect",
+            "detection", "object", "objects", "building", "buildings", "tree",
+            "water", "field", "sam", "ai", "model", "onnx", "instance",
+        ),
+        implementation="backend (ONNX Runtime, models cached under .models)",
+        tools=("ai_models", "ai_pull_model", "ai_unload_model", "segment_image"),
+    ),
+    Capability(
+        id="imagery.detection",
+        title="Local object detection (COCO)",
+        summary=(
+            "Find known objects — vehicles, boats, aircraft, people — in aerial and "
+            "drone imagery with a local detector, as labelled boxes. COCO classes "
+            "only, and weak below about a metre per pixel; use segmentation for "
+            "objects the detector has no name for."
+        ),
+        keywords=(
+            "detect", "detection", "object", "objects", "car", "cars", "vehicle",
+            "truck", "boat", "ship", "airplane", "aircraft", "person", "coco",
+            "yolo", "detr", "box", "boxes", "count", "counting", "ai", "model",
+        ),
+        implementation="backend (ONNX Runtime, models cached under .models)",
+        tools=("ai_models", "ai_pull_model", "ai_unload_model", "detect_objects"),
+    ),
+    Capability(
+        id="ai.sandbox-packages",
+        title="Heavy geospatial AI libraries in the sandbox",
+        summary=(
+            "When installed as the geoai extra, run_python can import torchgeo, "
+            "terratorch and torch: multispectral pretrained backbones, EO "
+            "foundation models, dataset/sampler plumbing. skill() maps each "
+            "package's API and ai_fetch_model pulls weights into .models."
+        ),
+        keywords=(
+            "torchgeo", "terratorch", "torch", "prithvi", "satmae", "fine-tune",
+            "training", "foundation model", "pretrained", "weights", "multispectral",
+            "sentinel-2", "sampler", "datamodule", "lightning", "skill", "api",
+        ),
+        implementation="backend (python sandbox; optional geoai extra)",
+        tools=("run_python", "skill", "python_help", "ai_fetch_model"),
     ),
     Capability(
         id="python.execution",

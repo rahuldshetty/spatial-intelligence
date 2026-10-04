@@ -10,6 +10,7 @@ import { renderStatusBar } from "../components/status-bar.js";
 import { renderMenubar } from "../components/menubar.js";
 import { el } from "../dom.js";
 import { state, setState } from "../store.js";
+import { hold, isFollowing, scrollTo, watchOutput } from "../scroll.js";
 import { renderAddCellRow, renderCellsTab } from "./cells.js";
 import { renderDataTab } from "./data.js";
 import { mountMap, syncMap } from "./map.js";
@@ -22,6 +23,7 @@ let tabScrollTop = 0;
 
 export function mountShell(root) {
   rootEl = root || document.getElementById("app");
+  watchOutput(rootEl);
   renderShell();
 }
 
@@ -97,8 +99,13 @@ function captureTabScroll() {
 function restoreTabScroll() {
   const content = document.getElementById("tab-content");
   if (!content) return;
+  if (isFollowing()) {
+    // Following wants the bottom, so a remembered position is overruled.
+    hold();
+    return;
+  }
   const target = Math.min(tabScrollTop, Math.max(0, content.scrollHeight - content.clientHeight));
   requestAnimationFrame(() => {
-    content.scrollTop = target;
+    scrollTo(content, target);
   });
 }

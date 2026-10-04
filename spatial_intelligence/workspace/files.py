@@ -32,8 +32,15 @@ PROGRESS_INTERVAL_BYTES = 4 * 1024 * 1024
 PROGRESS_INTERVAL_SECONDS = 0.25
 #: Stream chunk size.
 CHUNK_BYTES = 1024 * 1024
-#: Default read size cap for :func:`read_text`.
+#: Default read cap for :func:`read_text`, and the ceiling for a larger window.
 MAX_READ_BYTES = 1_000_000
+#: Chars per token, matching the compaction harness's heuristic.
+CHARS_PER_TOKEN = 4
+#: Share of the window one read may spend. Compaction keeps the newest results,
+#: so a few big reads must fit under the half-window target by themselves.
+READ_WINDOW_SHARE = 0.125
+#: Floor, so a small window still allows a useful read.
+MIN_READ_BYTES = 16_000
 
 _USER_AGENT = "spatial-intelligence/0.1"
 _HTTPS_SCHEMES = ("http://", "https://")
@@ -61,6 +68,18 @@ def find_files(workspace: Workspace, pattern: str) -> list[str]:
         for path in workspace.root.rglob(pattern)
         if path.is_file()
     )
+
+
+def read_limit_bytes(context_window: int) -> int:
+    """Bytes one read may return for a model with this context window.
+
+    Compaction cannot undo a result already in the history, so this cap is what
+    keeps one read from spending the window. ``0`` means the window is unknown.
+    """
+    if context_window <= 0:
+        return MAX_READ_BYTES
+    scaled = int(context_window * READ_WINDOW_SHARE * CHARS_PER_TOKEN)
+    return max(MIN_READ_BYTES, min(MAX_READ_BYTES, scaled))
 
 
 def read_text(

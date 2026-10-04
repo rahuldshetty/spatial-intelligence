@@ -12,13 +12,17 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from pydantic_ai_harness.compaction import DEFAULT_CONTEXT_WINDOW
+
 from ..agent.builder import BuiltAgent, build_agent
+from ..ai.manager import MANAGER_SERVICE
 from ..contracts.errors import RuntimeNotBoundError
 from ..settings.env import server_base_url
 from ..tools.build import default_registry
 from ..tools.registry import ToolRegistry
 from ..tools.runtime import RuntimeEvents, ToolRuntime
 from ..workspace import Workspace
+from ..workspace.files import read_limit_bytes
 from .bus import EventBus
 from .jobs import JobRegistry
 
@@ -130,6 +134,11 @@ class SessionServices:
             ),
             base_url=self._base_url,
             approved=self._approval_granted(),
+            # Compaction cannot undo a result already in the history, so the
+            # read cap is derived from the same window it targets.
+            max_read_bytes=read_limit_bytes(
+                int(self._settings().get("context_window", 0) or 0) or DEFAULT_CONTEXT_WINDOW
+            ),
         )
         registry = default_registry(runtime)
         # The capability pack reads the registry back out of the service bag, so
@@ -142,7 +151,16 @@ class SessionServices:
         return runtime
 
     def unbind(self) -> None:
-        """Forget the runtime, registry, and agent."""
+        """Forget the runtime, registry, and agent, and free loaded models."""
+        runtime = self._runtime
+        if runtime is not None:
+            manager = runtime.services.get(MANAGER_SERVICE)
+            if manager is not None:
+                # A loaded model is tens of megabytes of session; dropping the
+                # runtime without closing it would keep that alive until the
+                # process ends, which is exactly the leak the manager exists to
+                # prevent.
+                manager.close()
         self._registry = None
         self._runtime = None
         self._built = None
@@ -152,7 +170,9 @@ class SessionServices:
         if self._registry is None:
             return
         self._built = build_agent(
-            self._registry, lambda: self._settings().get("model", "")
+            self._registry,
+            lambda: self._settings().get("model", ""),
+            context_window=int(self._settings().get("context_window", 0) or 0),
         )
 
     @contextmanager

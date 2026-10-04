@@ -23,7 +23,7 @@ def app_root() -> Path:
     ``GEOAI_HOME`` wins when set. Otherwise a dev checkout (a ``.git`` dir or
     an existing ``workspaces/`` next to the package) keeps data beside the
     source; anything else (a pip-installed or frozen app) falls back to the
-    XDG data home at ``~/.local/share/geo-ai``.
+    XDG data home at ``~/.local/share/spatial-intelligence``.
     """
     env = os.getenv("GEOAI_HOME", "").strip()
     if env:
@@ -32,7 +32,13 @@ def app_root() -> Path:
         return _PACKAGE_ROOT
     xdg = os.getenv("XDG_DATA_HOME", "").strip()
     base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
-    return base / "geo-ai"
+    current = base / "spatial-intelligence"
+    legacy = base / "geo-ai"
+    # An install from before the project was renamed keeps the data root it has
+    # been writing to; a fresh one gets the new name. Never both.
+    if legacy.is_dir() and not current.is_dir():
+        return legacy
+    return current
 
 
 def model_from_env() -> str:
@@ -127,6 +133,93 @@ def max_retries() -> int:
         return 5
 
 
+def max_requests() -> int:
+    """Return the per-run model-request cap from ``GEOAI_MAX_REQUESTS``.
+
+    One request is one model call: a run that fetches a checkpoint, tiles a
+    raster, and then styles the map spends several, so the cap has to leave room
+    for a real analysis. Defaults to 200; values are clamped to at least 1.
+    """
+    raw = os.getenv("GEOAI_MAX_REQUESTS", "200").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 200
+
+
+def context_window() -> int:
+    """Return the model's context window in tokens from ``GEOAI_CONTEXT_WINDOW``.
+
+    Zero means "resolve it from the model id". A self-hosted or proxy id resolves
+    to nothing — compaction then assumes 200k — so a deployment that knows its
+    real window states it here.
+    """
+    raw = os.getenv("GEOAI_CONTEXT_WINDOW", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def models_dir() -> Path:
+    """Return the local model cache root.
+
+    ``GEOAI_MODELS_DIR`` wins; otherwise models live beside the other app data
+    at ``<GEOAI_HOME>/.models``, which in a dev checkout is the repo root. The
+    directory is created lazily by the store, never by this function.
+    """
+    override = os.getenv("GEOAI_MODELS_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return app_root() / ".models"
+
+
+def skills_dir() -> Path:
+    """Return the writable skills cache (``GEOAI_SKILLS_DIR`` or ``.skills``).
+
+    The committed trees inside the package are read-only; anything the app or
+    the user adds — a generated API tree for a package, an override — lands here.
+    """
+    override = os.getenv("GEOAI_SKILLS_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return app_root() / ".skills"
+
+
+def model_cache_size() -> int:
+    """Return how many models may stay in memory at once (default 2, min 1)."""
+    raw = os.getenv("GEOAI_MODEL_CACHE_SIZE", "2").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 2
+
+
+def model_ttl() -> float:
+    """Return the idle seconds after which a loaded model may be dropped."""
+    raw = os.getenv("GEOAI_MODEL_TTL", "300").strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 300.0
+
+
+def onnx_threads() -> int:
+    """Return the ONNX Runtime intra-op thread count.
+
+    Defaults to one thread per core up to four: ONNX Runtime scales well to
+    that point on the CPUs a desktop app runs on, and past it the encoder is
+    memory-bound while a fully loaded machine hurts everything else.
+    """
+    raw = os.getenv("GEOAI_ONNX_THREADS", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return max(1, min(4, (os.cpu_count() or 2) - 1))
+
+
 def resolve_workspace_name(override: str | None = None) -> str:
     """Resolve the active workspace name.
 
@@ -193,6 +286,7 @@ def load_env() -> None:
     path = app_root() / ".env"
     shadowed = _shadowed_keys(path)
     load_dotenv(path)
+    _route_model_caches()
     if shadowed:
         # Silent shadowing is the confusing case: the file says one thing, the
         # process environment says another, and the process wins.
@@ -202,6 +296,26 @@ def load_env() -> None:
             + ", ".join(sorted(shadowed)),
             file=sys.stderr,
         )
+
+
+def _route_model_caches() -> None:
+    """Send library model caches to the app's model store.
+
+    Torch and Hugging Face download into their own caches by default, which
+    would scatter gigabytes outside ``.models`` and outside the gitignore. Set
+    once at startup, before anything can import them; a value the user set
+    explicitly is left alone.
+    """
+    root = models_dir()
+    for key, relative in (
+        ("HF_HOME", "huggingface"),
+        ("HF_HUB_CACHE", "huggingface/hub"),
+        ("TORCH_HOME", "torch"),
+        ("TRANSFORMERS_CACHE", "huggingface/transformers"),
+    ):
+        if os.getenv(key, "").strip():
+            continue
+        os.environ[key] = str(root / relative)
 
 
 def _shadowed_keys(path: Path) -> set[str]:

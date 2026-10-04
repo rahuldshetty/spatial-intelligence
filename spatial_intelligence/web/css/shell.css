@@ -130,8 +130,15 @@ button {
   text-overflow: ellipsis;
 }
 
-.status-stats {
+/* Workspace name on the left; totals and the follow toggle pushed right. */
+.status-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.status-stats {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -146,4 +153,29 @@ button {
 .status-stats .stat.cost {
   color: var(--success);
   font-weight: 600;
+}
+
+.follow-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-3);
+}
+
+.follow-toggle:hover {
+  color: var(--text);
+}
+
+.follow-toggle.active {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.follow-toggle input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--primary);
 }

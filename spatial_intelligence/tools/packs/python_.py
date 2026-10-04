@@ -27,15 +27,22 @@ class PythonPack:
         )
 
     @tool(core=True, effects=frozenset({Effect.WORKSPACE_WRITE, Effect.PROCESS, Effect.NETWORK}))
-    def run_python(self, code: str) -> str:
+    def run_python(self, code: str, timeout_seconds: int = 0) -> str:
         """Run a snippet of Python for math/processing and capture its output.
 
         In safe mode the sandbox exposes the geospatial stack (``numpy``, ``pandas``,
         ``geopandas``, ``rasterio``, ``rioxarray``, ``xarray``, ``shapely``, ``pyproj``),
-        basic stdlib (``os``, ``sys``, ``pathlib``, ``shutil``, ...), and a
-        workspace-confined ``ws`` helper; subprocess, network, dynamic execution,
-        and raw command calls are rejected. With dangerous mode enabled every guard
-        is lifted and the snippet runs as arbitrary Python.
+        basic stdlib (``os``, ``sys``, ``pathlib``, ``shutil``, ...), a
+        workspace-confined ``ws`` helper, and a read-only ``models`` view of the
+        model cache; subprocess, network, dynamic execution, and raw command calls
+        are rejected. Heavy packages installed as the ``geoai`` extra (torchgeo,
+        terratorch, torch) are importable too — skill() documents their APIs.
+        With dangerous mode enabled every guard is lifted.
+
+        ``timeout_seconds`` raises the wall-clock cap for this call when a model
+        needs minutes per tile (0 keeps the default). The snippet runs on a
+        daemon thread that cannot be killed, so a call that times out keeps
+        running in the background: size the work to finish inside the cap.
 
         The returned text is a bounded preview (first few lines). The full output is
         stored and can be paged with ``inspect_output`` or filtered with
@@ -44,7 +51,7 @@ class PythonPack:
         # The session's approval is the single source of truth: the settings
         # toggle may have flipped since the shared executor was created.
         self.executor.approved = self._rt.approved
-        return self.executor.run(code)
+        return self.executor.run(code, timeout=timeout_seconds or None)
 
     @tool()
     def inspect_output(self, start: int = 0, count: int = 30) -> str:

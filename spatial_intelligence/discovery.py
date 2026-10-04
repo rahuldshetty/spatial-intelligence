@@ -44,6 +44,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         keywords=(
             "map", "plot", "display", "layer", "style", "raster", "vector",
             "heatmap", "density", "swipe", "compare", "before", "after",
+            "basemap", "background",
         ),
         implementation="backend+geolibre",
         tools=(
@@ -52,6 +53,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "add_vector_to_map",
             "add_geojson",
             "add_heatmap",
+            "add_basemap",
             "swipe_compare",
             "style_layer",
             "fit_bounds",

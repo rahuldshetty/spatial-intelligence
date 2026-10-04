@@ -32,6 +32,7 @@ LOCAL_SOURCE_KEY = "geoaiSourcePath"
 
 __all__ = [
     "LOCAL_SOURCE_KEY",
+    "add_basemap",
     "add_colorbar",
     "add_geojson",
     "add_legend",
@@ -388,6 +389,70 @@ def set_basemap(workspace: Workspace, map_obj: Map, basemap: str) -> dict:
     persist_map(map_obj, workspace)
     return {"status": "applied", "basemap": basemap}
 
+
+#: Known raster basemaps, mirrored from GeoLibre's app catalog (``RASTER_BASEMAPS``
+#: in the bundled maplibre-geoagent build). A MapLibre style URL cannot express
+#: these — ``basemapStyleUrl`` takes a vector style JSON — so each is an XYZ
+#: template added as an ordinary raster layer. Attribution is the provider's,
+#: as the app requires.
+RASTER_BASEMAPS: dict[str, dict[str, str]] = {
+    "google_satellite": {
+        "name": "Google Satellite",
+        "url": "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        "attribution": "Google",
+    },
+    "google_hybrid": {
+        "name": "Google Hybrid",
+        "url": "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+        "attribution": "Google",
+    },
+    "esri_world_imagery": {
+        "name": "Esri World Imagery",
+        "url": (
+            "https://server.arcgisonline.com/ArcGIS/rest/services/"
+            "World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        ),
+        "attribution": "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+    },
+}
+
+
+def add_basemap(
+    workspace: Workspace,
+    map_obj: Map,
+    basemap: str,
+    *,
+    name: str | None = None,
+    url: str | None = None,
+    attribution: str | None = None,
+) -> dict:
+    """Add a known raster basemap (satellite/imagery) beneath the other layers.
+
+    ``basemap`` names a provider in :data:`RASTER_BASEMAPS`
+    (``google_satellite``, ``google_hybrid``, ``esri_world_imagery``; dashes and
+    spaces are accepted), or pass ``url`` with any XYZ template. Unlike
+    :func:`set_basemap`, which swaps the MapLibre vector *style*, this adds a
+    layer and moves it to the bottom of the draw order, so analysis layers stay
+    on top. Raises :class:`ToolInputError` when the name is unknown and no
+    ``url`` is given.
+    """
+    key = str(basemap or "").strip().lower().replace("-", "_").replace(" ", "_")
+    entry = RASTER_BASEMAPS.get(key)
+    if url is None:
+        if entry is None:
+            options = ", ".join(sorted(RASTER_BASEMAPS))
+            raise ToolInputError(
+                f"unknown basemap {basemap!r}; expected one of {options}, or a url"
+            )
+        url = entry["url"]
+        attribution = attribution or entry["attribution"]
+    layer_name = clean_layer_name(
+        name or (entry["name"] if entry else key) or "Basemap"
+    )
+    layer_id = add_tile_layer(workspace, map_obj, url, layer_name, attribution)
+    map_obj.move_layer(layer_id, 0)
+    persist_map(map_obj, workspace)
+    return {"status": "applied", "layer": layer_id, "name": layer_name, "url": url}
 
 
 #: Swipe placeholder selecting the basemap as one side of the comparison.

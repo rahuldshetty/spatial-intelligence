@@ -79,6 +79,13 @@ Rules:
 11. Use web_search for documentation, provider terms, or current facts no dataset
     tool covers; treat results as leads and download a promising URL to verify.
 12. Report concisely what you did and where outputs live (relative paths).
+13. When a result is compared against a reference map (a Google/Esri basemap, a
+    screenshot, another date), the reference is a different sensor, date and
+    resolution, so the match is qualitative only. Lay the analysis's own input
+    data on the map first — add_raster the bands or composite it used, with its
+    date in the layer name — and add a base layer map when one is needed:
+    add_basemap for Google/Esri satellite imagery, set_basemap for a vector
+    style, add_tile_layer/add_wms for any other service.
 
 Runtime environment:
 - run_python exposes the geospatial stack (rasterio, rioxarray, numpy, geopandas,

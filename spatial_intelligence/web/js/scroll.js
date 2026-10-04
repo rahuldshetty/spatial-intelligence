@@ -26,8 +26,6 @@ let queued = false;
 let enabled = false;
 let observer = null;
 
-const listeners = new Set();
-
 /** The panel's scroll container, if the shell has one right now. */
 function panel() {
   return document.getElementById("tab-content");
@@ -43,18 +41,11 @@ export function isFollowing() {
   return enabled;
 }
 
-/** Call ``fn(enabled)`` now and after every change; returns an unsubscribe. */
-export function onFollowChange(fn) {
-  listeners.add(fn);
-  fn(enabled);
-  return () => listeners.delete(fn);
-}
-
 function setFollowing(next) {
   const value = Boolean(next);
   if (value === enabled) return;
   enabled = value;
-  for (const fn of [...listeners]) fn(enabled);
+  syncToggle();
   if (value) hold();
 }
 
@@ -112,20 +103,32 @@ export function watchOutput(root) {
   observer.observe(app, { childList: true, subtree: true, characterData: true });
 }
 
-/** The button that turns following on and off; reflects the current state. */
-export function followButton() {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.id = "follow-button";
-  button.className = "follow-button";
-  button.addEventListener("click", () => setFollowing(!enabled));
-  onFollowChange((on) => {
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-pressed", on ? "true" : "false");
-    button.title = on ? "Following new output — click to stop" : "Follow new output";
-    button.textContent = on ? "Following" : "Follow output";
-  });
-  return button;
+/* The one checkbox on screen. The status bar is rebuilt on every update, so this
+   holds the newest one and writes the state into it directly rather than
+   subscribing each copy — a subscriber per rebuild would never be released. */
+let toggle = null;
+
+function syncToggle() {
+  if (!toggle) return;
+  toggle.checked = enabled;
+  if (toggle.parentElement) toggle.parentElement.classList.toggle("active", enabled);
+}
+
+/** The status-bar checkbox that turns following on and off. */
+export function followToggle() {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.setAttribute("id", "follow-output");
+  const label = document.createElement("label");
+  label.className = "follow-toggle";
+  label.setAttribute("for", "follow-output");
+  label.title = "Scroll to the bottom as new output arrives";
+  label.append(box, document.createTextNode("Follow output"));
+  box.checked = enabled;
+  label.classList.toggle("active", enabled);
+  box.addEventListener("change", () => setFollowing(box.checked));
+  toggle = box;
+  return label;
 }
 
 /* The panel keeps its id across rebuilds, so the listener has to move to the

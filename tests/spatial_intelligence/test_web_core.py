@@ -735,6 +735,8 @@ if (gated) {
     const firstMap = app.querySelector("#map-panel");
     check("shell.first_render_regions", Boolean(firstMenubar && firstMap && app.querySelector("#side-panel")));
     check("shell.tab_content", Boolean(app.querySelector("#tab-content")));
+    const toggle = app.querySelector("#follow-output");
+    check("shell.follow_toggle_in_status_bar", Boolean(toggle && toggle.closest("#status-bar")));
 
     shell.renderShell();
     check("shell.map_panel_preserved", app.querySelector("#map-panel") === firstMap);
@@ -878,20 +880,19 @@ await scenario("scroll", async () => {
 
   eq("scroll.starts_off", scroll.isFollowing(), false);
 
-  const button = scroll.followButton();
-  eq(
-    "scroll.button_starts_off",
-    [button.textContent, button.getAttribute("aria-pressed")],
-    ["Follow output", "false"]
-  );
+  const button = scroll.followToggle();
+  const box = button.querySelector("input");
+  const label = button.textContent;
+  eq("scroll.toggle_starts_off", [scroll.isFollowing(), box.checked, label], [false, false, "Follow output"]);
 
   // Following is the reader's choice: a scroll while it is off changes nothing.
   panel.scrollTop = 0;
   panel.dispatch("scroll", {});
   eq("scroll.ignores_scroll_while_off", scroll.isFollowing(), false);
 
-  button.click();                            // turn it on: go to the bottom now
-  eq("scroll.button_turns_it_on", [scroll.isFollowing(), button.getAttribute("aria-pressed")], [true, "true"]);
+  box.checked = true;                        // turn it on: go to the bottom now
+  box.dispatch("change", {});
+  eq("scroll.toggle_turns_it_on", [scroll.isFollowing(), button.className.includes("active")], [true, true]);
   eq("scroll.jump_goes_to_the_bottom", panel.scrollTop, 1000);
 
   panel.scrollHeight = 1200;                 // new content arrives
@@ -901,13 +902,14 @@ await scenario("scroll", async () => {
   panel.scrollTop = 300;                     // reader scrolled up to read
   panel.dispatch("scroll", {});
   eq("scroll.stops_when_scrolled_away", scroll.isFollowing(), false);
-  eq("scroll.button_reflects_the_stop", button.textContent, "Follow output");
+  eq("scroll.toggle_reflects_the_stop", [box.checked, button.className.includes("active")], [false, false]);
   panel.scrollHeight = 1400;
   scroll.hold();
   eq("scroll.keeps_the_readers_place", panel.scrollTop, 300);
 
-  button.click();                            // clicking again takes them back down
-  eq("scroll.button_returns_to_the_bottom", [scroll.isFollowing(), panel.scrollTop], [true, 1400]);
+  box.checked = true;                        // ticking again takes them back down
+  box.dispatch("change", {});
+  eq("scroll.toggle_returns_to_the_bottom", [scroll.isFollowing(), panel.scrollTop], [true, 1400]);
 
   // Our own write is followed by more content before its scroll event lands, so
   // the event reports a position that is no longer the bottom.
@@ -926,7 +928,8 @@ await scenario("scroll", async () => {
   eq("scroll.still_yields_to_the_reader", scroll.isFollowing(), false);
 
   // The shell swaps the panel on every render; following must survive that.
-  button.click();
+  box.checked = true;
+  box.dispatch("change", {});
   const replacement = document.createElement("div");
   replacement.setAttribute("id", "tab-content");
   replacement.scrollHeight = 4000;

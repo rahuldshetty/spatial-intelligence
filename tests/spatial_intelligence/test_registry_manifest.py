@@ -53,7 +53,7 @@ EXPECTED_CATEGORY_COUNTS = {
     "detection": 1,
     "files": 6,
     "interaction": 1,
-    "layers": 23,
+    "layers": 24,
     "plan": 6,
     "python": 4,
     "raster": 17,
@@ -80,7 +80,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 101)
+        self.assertEqual(len(self.registry), 102)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -134,7 +134,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 93)
+        self.assertEqual(len(implemented), 94)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)
@@ -204,6 +204,7 @@ EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "add_vector_to_map",
         "add_geojson",
         "add_heatmap",
+        "add_basemap",
         "swipe_compare",
         "style_layer",
         "fit_bounds",

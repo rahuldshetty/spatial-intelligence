@@ -627,6 +627,33 @@ class MapLayerServiceTests(MapTestCase):
 
         self.assertIn("STYLES=bright", tiles)
 
+    def test_add_basemap_adds_a_known_provider_beneath_existing_layers(self):
+        # An analysis layer first, so "beneath" is observable in the draw order.
+        result_id = layerops.add_geojson(
+            self.workspace, self.map, json.dumps(FEATURE_COLLECTION), "Fields"
+        )
+
+        added = layerops.add_basemap(self.workspace, self.map, "google-satellite")
+
+        layer = layerops.find_layer(self.map, added["layer"])
+        self.assertEqual(
+            layer["source"]["tiles"][0],
+            "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        )
+        self.assertEqual(layer["source"]["attribution"], "Google")
+        self.assertEqual(layer["name"], "Google Satellite")
+        # imagery sits under the analysis layer, not over it
+        self.assertEqual(
+            [item["id"] for item in self.map.project["layers"]],
+            [added["layer"], result_id],
+        )
+
+    def test_add_basemap_rejects_an_unknown_provider(self):
+        with self.assertRaises(ToolInputError) as caught:
+            layerops.add_basemap(self.workspace, self.map, "no-such-provider")
+
+        self.assertIn("unknown basemap", str(caught.exception))
+
 
 class LayersPackTests(MapTestCase):
     def build_pack(self, notifications: list[str], map_notifications: list[str]):
@@ -711,6 +738,7 @@ class LayersPackTests(MapTestCase):
             "add_wms": frozenset({Effect.MAP_WRITE}),
             "set_view": frozenset({Effect.MAP_WRITE}),
             "set_basemap": frozenset({Effect.MAP_WRITE}),
+            "add_basemap": frozenset({Effect.MAP_WRITE}),
             "fit_bounds": frozenset({Effect.MAP_WRITE}),
             "style_layer": frozenset({Effect.MAP_WRITE}),
             "classify_layer": frozenset({Effect.MAP_WRITE}),

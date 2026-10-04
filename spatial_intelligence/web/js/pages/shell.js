@@ -10,7 +10,7 @@ import { renderStatusBar } from "../components/status-bar.js";
 import { renderMenubar } from "../components/menubar.js";
 import { el } from "../dom.js";
 import { state, setState } from "../store.js";
-import { followButton, hold, isFollowing, scrollTo, watchOutput } from "../scroll.js";
+import { hold, isFollowing, scrollTo, watchOutput } from "../scroll.js";
 import { renderAddCellRow, renderCellsTab } from "./cells.js";
 import { renderDataTab } from "./data.js";
 import { mountMap, syncMap } from "./map.js";
@@ -59,8 +59,7 @@ export function renderSidePanel() {
   content.append(renderTabContent());
   const toolbar =
     state.selected_tab === "Cells" && state.active_workspace ? renderAddCellRow() : null;
-  const follow = state.selected_tab === "Cells" ? followButton() : null;
-  appendToPanel(panel, tabbar, toolbar, content, follow, renderStatusBar());
+  appendToPanel(panel, tabbar, toolbar, content, renderStatusBar());
   return panel;
 }
 

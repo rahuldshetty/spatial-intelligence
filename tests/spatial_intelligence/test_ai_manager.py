@@ -212,7 +212,7 @@ class FailureTests(ManagerTestCase):
             with manager.reserve("no-such-model"):
                 pass
 
-    def test_a_missing_onnxruntime_explains_the_extra(self):
+    def test_a_missing_onnxruntime_explains_itself(self):
         manager = ModelManager()
         self._loader.stop()  # this one needs the real loader
         try:
@@ -223,7 +223,8 @@ class FailureTests(ManagerTestCase):
         finally:
             self._loader.start()
 
-        self.assertIn("spatial-intelligence[ai]", str(caught.exception))
+        self.assertIn("onnxruntime is missing", str(caught.exception))
+        self.assertIn("reinstall", str(caught.exception))
 
 
 class ConcurrencyTests(ManagerTestCase):

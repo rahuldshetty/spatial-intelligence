@@ -1,5 +1,4 @@
 """The agent's system prompt: identity, workspace layout, and cross-tool rules.
-
 Kept deliberately lean because ``ReinjectSystemPrompt`` re-sends it on *every*
 model request. Tool mechanics (parameter meanings, units, limits) belong in the
 tool docstrings, which reach the model with the schemas and through
@@ -7,6 +6,10 @@ tool docstrings, which reach the model with the schemas and through
 that picks between tools, and the few facts no schema carries (the bridge's
 missing scripting RPC, the Sentinel-1 layout, the absent ``osgeo`` bindings).
 """
+
+from __future__ import annotations
+
+from ..pythonruntime import packages
 
 SYSTEM_PROMPT = """You are GeoAI, a geospatial-analysis agent in a Geo-AI web workspace.
 You control a live GeoLibre map (visible to the user) and a workspace folder.
@@ -90,5 +93,15 @@ Runtime environment:
 - gdal_translate applies GDAL creation options only; it does not subset, resize,
   rescale, or convert pixel types.
 - band_math evaluates a NumPy expression but needs dangerous mode; use run_python
-  with numpy for band math while it is off.
-"""
+  with numpy for band math while it is off."""
+
+
+def system_prompt() -> str:
+    """Return the system prompt plus what this machine's sandbox can import.
+
+    The optional-package lines are generated per agent build and are empty when
+    nothing extra is installed, so a lean install pays nothing for a capability
+    it does not have.
+    """
+    block = packages.prompt_block()
+    return f"{SYSTEM_PROMPT}\n{block}\n" if block else SYSTEM_PROMPT

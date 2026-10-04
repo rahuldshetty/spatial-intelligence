@@ -26,6 +26,8 @@ import skimage
 import xarray
 
 
+from . import packages
+
 #: Cap on a returned docstring.
 MAX_DOC = 4000
 #: Cap on how many members a ``dir``-style listing returns.
@@ -53,6 +55,15 @@ ROOTS = {
     "pyproj": pyproj,
     "json": json,
 }
+
+
+def roots() -> dict:
+    """Return the core namespace plus whatever optional packages are installed.
+
+    Called per lookup rather than built at import: importing torch to answer a
+    question about ``rasterio`` would cost seconds on every app start.
+    """
+    return {**ROOTS, **packages.bindings()}
 
 #: The workspace facade ``run_python`` binds, described as its own "symbol".
 WS_DOC = (
@@ -159,10 +170,11 @@ def describe(name: str = "") -> dict:
     argument it lists the available top-level roots.
     """
     name = (name or "").strip()
+    available = roots()
     if not name:
         return {
             "kind": "namespace",
-            "roots": sorted(ROOTS) + ["ws"],
+            "roots": sorted(available) + ["ws"],
             "doc": "Top-level run_python names. Query a dotted path for details.",
         }
 
@@ -171,14 +183,14 @@ def describe(name: str = "") -> dict:
 
     parts = name.split(".")
     root = parts[0]
-    if root not in ROOTS:
+    if root not in available:
         return {
             "name": name,
             "kind": "error",
-            "doc": f"unknown root {root!r}; available: {sorted(ROOTS)}",
+            "doc": f"unknown root {root!r}; available: {sorted(available)}",
         }
 
-    obj = ROOTS[root]
+    obj = available[root]
     try:
         for part in parts[1:]:
             obj = getattr(obj, part)
@@ -188,4 +200,4 @@ def describe(name: str = "") -> dict:
     return _describe(name, obj)
 
 
-__all__ = ["MAX_DOC", "MAX_MEMBERS", "MAX_REPR", "ROOTS", "WS_DOC", "describe"]
+__all__ = ["MAX_DOC", "MAX_MEMBERS", "MAX_REPR", "ROOTS", "WS_DOC", "describe", "roots"]

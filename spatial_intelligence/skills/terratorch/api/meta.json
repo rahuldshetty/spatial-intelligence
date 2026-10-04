@@ -1,0 +1,20 @@
+{
+  "built_at": "2026-10-04T17:04:37+00:00",
+  "files": {
+    "cli_tools.md": "dce3a837802748a142e2c70e112702451c4ba0c8aa77cb59eef8079d323fb7a2",
+    "datamodules.catalog.md": "1317ebbb59a5078ccc7ca0ef5701a40b51795c709fda68552ffb985cc09274b3",
+    "datasets.catalog.md": "86fc3c6d2c85e4ff0ea6ea8c01443a0f2f45f9c095e040de5a58595de80838cd",
+    "index.md": "59d846838f1cc649bc28849ea479057baac8519afdeee48176267af2b088a6b2",
+    "models.md": "f5cc57fa13c009e17f67f9d7ba40bd87abed054da28b97220291671d8a1b8f5e",
+    "registry.md": "d793dea690e6abbf07cbdb6bfb658f8d2c5efab8ca943ae3246ace3f914d41a5",
+    "samplers.md": "f577a4d49c376c690ef7ac276a461d7b9ebdc80f1f6eb66e635fb92a1ac262cb",
+    "tasks.md": "86fe07b8b067f038aa9c67aed24f2f6879c2ad8e0222c7631c85c333282717de",
+    "utils.md": "ea03f12c18360b652f7d44baf664cfa5ad61d3ef95440516f4fc0958ba52f0b9",
+    "validate_config.md": "7c6ed737d7182872cc96583e47f5959b325484b4e6837c6ae4fc11fdaae63d6f",
+    "visualization.md": "515a02e6228de05ca3c50bdb1522af9f9fa019d24001158691f61c957fc00ebc"
+  },
+  "generator": "spatial_intelligence.pythonruntime.spec",
+  "package": "terratorch",
+  "root": "C:\\Files\\QGIS\\geo-ai\\spatial_intelligence\\skills\\terratorch",
+  "version": "1.2.11"
+}

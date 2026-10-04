@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "spatial-intelligence"
 version = "0.0.1"
 description = "Spatial Intelligence: a geospatial-analysis agent in a custom web UI"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "python-dotenv",
@@ -36,6 +37,12 @@ dependencies = [
   "uvicorn",
   "python-multipart",
   "geolibre==2.9.0",
+  # Local AI models (segment_image, detect_objects). A main dependency, not an
+  # extra: it is 14 MB, ships wheels everywhere, and backs tools the UI presents
+  # as built in — an install that cannot segment is a broken install.
+  # `onnxruntime-gpu` provides the same import where CUDA is wanted; install one
+  # or the other, never both.
+  "onnxruntime>=1.20",
 ]
 
 # The `gdal` package (the `osgeo` bindings) is deliberately absent: it publishes no
@@ -43,12 +50,30 @@ dependencies = [
 # that is not present — and nothing here uses it. GDAL itself ships inside rasterio
 # (3.10.3), which is what `gdal_translate` drives.
 
+[project.urls]
+Homepage = "https://github.com/spatialint-org/spatial-intelligence"
+Repository = "https://github.com/spatialint-org/spatial-intelligence"
+Issues = "https://github.com/spatialint-org/spatial-intelligence/issues"
+
 [project.optional-dependencies]
-# Local AI models (segment_image and friends). An extra, not a dependency: a
-# workspace that only maps and analyses rasters should not pay 50 MB for it.
-# `onnxruntime-gpu` installs the same import on a CUDA machine, so it is the
-# alternative to name here, never both at once.
-ai = ["onnxruntime>=1.20"]
+# Heavy research libraries for the run_python sandbox, which `skill()` documents.
+# One extra, deliberately: torch alone is a 124 MB wheel (and far more installed),
+# and a CUDA machine needs torch from the CUDA index rather than the CPU wheel a
+# plain dependency would pin — so this stays something the user opts into, with
+# the index they actually want. `pip install -e ".[geoai]"` takes the CPU wheel.
+# terratorch's torchgeo pin forces the version split: 1.2.12+ demands
+# torchgeo>=0.9, and torchgeo 0.9 is Python 3.12+, so 3.11 stays on the last
+# unpinned terratorch.
+geoai = [
+  "torch>=2.2",
+  "terratorch>=1.2,<1.2.12; python_version < '3.12'",
+  "terratorch>=1.2.12; python_version >= '3.12'",
+  "torchgeo>=0.8,<0.9; python_version < '3.12'",
+  "torchgeo>=0.10; python_version >= '3.12'",
+  "torchvision",
+  "timm",
+  "huggingface_hub",
+]
 
 [project.scripts]
 spatial-intelligence = "spatial_intelligence.server:run"
@@ -57,4 +82,4 @@ spatial-intelligence = "spatial_intelligence.server:run"
 include = ["spatial_intelligence*"]
 
 [tool.setuptools.package-data]
-spatial_intelligence = ["web/**/*"]
+spatial_intelligence = ["web/**/*", "skills/**/*"]

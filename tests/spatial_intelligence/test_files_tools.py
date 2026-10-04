@@ -66,6 +66,16 @@ class FilesTestCase(unittest.TestCase):
 
 
 class WorkspaceFileTests(FilesTestCase):
+    def test_the_read_cap_scales_with_the_context_window(self):
+        """A read must not be able to spend the window before compaction sees it."""
+        self.assertEqual(fileops.read_limit_bytes(0), fileops.MAX_READ_BYTES)  # unknown window
+        self.assertEqual(fileops.read_limit_bytes(200_000), 100_000)
+        self.assertEqual(fileops.read_limit_bytes(1_000_000), 500_000)
+        # A window too small to scale still allows a useful read...
+        self.assertEqual(fileops.read_limit_bytes(32_000), fileops.MIN_READ_BYTES)
+        # ...and a huge one still stops at the ceiling.
+        self.assertEqual(fileops.read_limit_bytes(4_000_000), fileops.MAX_READ_BYTES)
+
     def test_listing_is_workspace_relative_and_sorted(self):
         self.data_file("data/b.txt")
         self.data_file("data/a.txt")
@@ -275,6 +285,25 @@ class FilesPackTests(FilesTestCase):
         registry = ToolRegistry()
         registry.add_pack(FilesPack, runtime)
         return registry
+
+    def test_read_file_refuses_more_than_the_deployment_cap(self):
+        """The cap is the deployment's, not the model's to raise."""
+        runtime = ToolRuntime(workspace=self.workspace, max_read_bytes=200)
+        registry = ToolRegistry()
+        registry.add_pack(FilesPack, runtime)
+        self.data_file("data/notes.txt", "x" * 400)
+        read = registry.get("read_file").callable
+
+        with self.assertRaises(ToolInputError) as caught:
+            read("data/notes.txt")
+        self.assertIn("read a slice with offset/limit", str(caught.exception))
+
+        # A slice within the cap still reads.
+        self.assertEqual(read("data/notes.txt", 200, 0, 10), "x" * 10)
+
+        with self.assertRaises(ToolInputError) as caught:
+            read("data/notes.txt", 5000)
+        self.assertIn("above this deployment's read cap", str(caught.exception))
 
     def test_write_file_records_the_output_and_notifies(self):
         notifications: list[str] = []

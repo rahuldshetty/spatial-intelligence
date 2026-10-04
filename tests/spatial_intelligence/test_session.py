@@ -20,11 +20,14 @@ from unittest.mock import patch
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import DeltaToolCall
+from pydantic_ai_harness import ClampOversizedMessages, TieredCompaction
+from pydantic_ai_harness.compaction import DEFAULT_CONTEXT_WINDOW
 
 from spatial_intelligence.agent import capabilities as agent_capabilities
 from spatial_intelligence.map import bridge
 from spatial_intelligence.session.app_state import AppState
 from spatial_intelligence.session.notebook_session import ordered_notebook_cells
+from spatial_intelligence.workspace.files import read_limit_bytes
 
 from .support import (
     Fails,
@@ -82,15 +85,17 @@ class SessionTestCase(unittest.TestCase):
             os.environ["GEOAI_HOME"] = self._previous_home
         self._tmp.cleanup()
 
-    def start(self, model, *, worker: bool = True) -> AppState:
+    def start(self, model, *, worker: bool = True, **overrides) -> AppState:
+        settings = {
+            "model": model,
+            "theme": "light",
+            "dangerous_mode": False,
+            "max_retries": 2,
+            "record_agent_steps": True,
+        }
+        settings.update(overrides)
         state = AppState(
-            settings={
-                "model": model,
-                "theme": "light",
-                "dangerous_mode": False,
-                "max_retries": 2,
-                "record_agent_steps": True,
-            },
+            settings=settings,
             worker=worker,
         )
         self._states.append(state)
@@ -239,6 +244,107 @@ class WorkerLifecycleTests(SessionTestCase):
 
         self.assertEqual(len(self._workers()), before)
         self.assertTrue(self.workspace_root.is_dir())
+
+
+class ContextOverflowStopTests(SessionTestCase):
+    """A length refusal stops the run and points at the window setting."""
+
+    def test_a_context_refusal_stops_the_run_and_names_the_setting(self):
+        script = TurnScript(
+            Fails(
+                ModelHTTPError(
+                    400,
+                    "This model's maximum context length is 128000 tokens. "
+                    "However, your messages resulted in 131067 tokens.",
+                )
+            ),
+            final="this attempt must never run",
+        )
+        state = self.start(script.model)
+        cell_id = state.add_cell("prompt", "keep going")["cells"][-1]["id"]
+
+        state.run_cell(cell_id)
+        cell = self.wait_for_status(state, cell_id, TERMINAL_STATUSES)
+
+        self.assertEqual(cell["status"], "stopped")
+        said = " ".join(str(step.get("content", "")) for step in cell["trace"])
+        self.assertIn("GEOAI_CONTEXT_WINDOW", said)
+        self.assertEqual(script.requests, 1)  # no replay: the history is the problem
+
+    def test_the_settings_window_and_clamp_reach_the_compaction_tier(self):
+        """The window has to land on the capability that uses it, or the setting
+        silently does nothing. Reaches a private attribute: a scripted model
+        reports no usage, so the estimator never trips and behaviour is out of
+        reach. The clamp is asserted first because the other tiers only drop
+        *old* messages.
+        """
+        state = self.start(answers_with("ok"), context_window=1000)
+        capabilities = state.services.agent._root_capability.capabilities
+        tiered = next(c for c in capabilities if isinstance(c, TieredCompaction))
+
+        self.assertEqual(tiered.context_window, 1000)
+        self.assertEqual(tiered.target_fraction, 0.5)
+        self.assertIsInstance(tiered.tiers[0], ClampOversizedMessages)
+
+    def test_the_read_cap_follows_the_configured_window(self):
+        """The read cap and the compaction target must agree on the window."""
+        state = self.start(answers_with("ok"), context_window=200_000)
+        self.assertEqual(
+            state.services.runtime.max_read_bytes, read_limit_bytes(200_000)
+        )
+
+        fallback = self.start(answers_with("ok"))  # no window: the same default compaction uses
+        self.assertEqual(
+            fallback.services.runtime.max_read_bytes,
+            read_limit_bytes(DEFAULT_CONTEXT_WINDOW),
+        )
+
+    def test_an_unset_window_leaves_resolution_to_the_model_id(self):
+        state = self.start(answers_with("ok"))
+        capabilities = state.services.agent._root_capability.capabilities
+        tiered = next(c for c in capabilities if isinstance(c, TieredCompaction))
+
+        self.assertIsNone(tiered.context_window)
+
+
+class RequestBudgetTests(SessionTestCase):
+    """A run that spends its request budget stops cleanly and says why.
+
+    Regression: pydantic-ai's default cap of 50 is below what a real analysis
+    needs, and the run was reported as a failure quoting the provider's wording.
+    """
+
+    def test_exceeding_the_request_cap_stops_the_run_and_explains_it(self):
+        # list_files is a core tool: one request to call it, one to answer.
+        model = scripted(ToolCallPart("list_files", {}), final="Listed the files.")
+        state = self.start(model, max_requests=1)
+        cell_id = state.add_cell("prompt", "what is here?")["cells"][-1]["id"]
+
+        state.run_cell(cell_id)
+        cell = self.wait_for_status(state, cell_id, TERMINAL_STATUSES)
+
+        self.assertEqual(cell["status"], "stopped")
+        said = "\n".join(str(step.get("content", "")) for step in cell["trace"])
+        self.assertIn("GEOAI_MAX_REQUESTS", said)
+
+        records = [
+            json.loads(line)
+            for line in (self.workspace_root / "traces" / f"{cell_id}.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        self.assertEqual(records[-1]["status"], "stopped")
+        self.assertIn("GEOAI_MAX_REQUESTS", records[-1]["error"])
+
+    def test_a_run_that_fits_its_cap_still_finishes(self):
+        """The cap has to include its last request, not stop one short of it."""
+        state = self.start(answers_with("ok"), max_requests=1)
+        cell_id = state.add_cell("prompt", "say ok")["cells"][-1]["id"]
+
+        state.run_cell(cell_id)
+        cell = self.wait_for_status(state, cell_id, TERMINAL_STATUSES)
+
+        self.assertEqual(cell["status"], "done")
 
 
 class PromptRunTests(SessionTestCase):

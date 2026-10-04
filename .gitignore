@@ -168,6 +168,10 @@ spatial_intelligence/web/vendor/marked.min.js
 # Local AI model cache (<GEOAI_HOME>/.models); fetched on demand, never committed
 .models/
 
+# Per-machine skills cache (<GEOAI_HOME>/.skills); the committed trees live in
+# spatial_intelligence/skills/
+.skills/
+
 # Spyder project settings
 .spyderproject
 .spyproject

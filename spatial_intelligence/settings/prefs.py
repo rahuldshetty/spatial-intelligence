@@ -32,6 +32,8 @@ def _defaults() -> dict:
         "theme": "light",
         "dangerous_mode": False,
         "max_retries": env.max_retries(),
+        "max_requests": env.max_requests(),
+        "context_window": env.context_window(),
         "record_agent_steps": True,
     }
 
@@ -71,10 +73,20 @@ def _normalize(settings: dict) -> dict:
         retries = int(settings.get("max_retries", defaults["max_retries"]))
     except (TypeError, ValueError):
         retries = defaults["max_retries"]
+    try:
+        requests = int(settings.get("max_requests", defaults["max_requests"]))
+    except (TypeError, ValueError):
+        requests = defaults["max_requests"]
+    try:
+        window = int(settings.get("context_window", defaults["context_window"]))
+    except (TypeError, ValueError):
+        window = defaults["context_window"]
     return {
         "model": model,
         "theme": theme,
         "dangerous_mode": bool(settings.get("dangerous_mode", False)),
         "max_retries": max(1, retries),
+        "max_requests": max(1, requests),
+        "context_window": max(0, window),
         "record_agent_steps": bool(settings.get("record_agent_steps", True)),
     }

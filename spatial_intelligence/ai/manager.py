@@ -137,7 +137,8 @@ class ModelManager:
 
         Downloads the model when it is missing and ``download`` is set. Raises
         :class:`~spatial_intelligence.contracts.errors.ToolInputError` when the
-        model is unknown, undownloadable, or onnxruntime is not installed.
+        model is unknown, undownloadable, or the onnxruntime this package ships
+        with cannot be imported.
         """
         spec = catalog.find(model_id)
         if not store.is_downloaded(spec):
@@ -198,8 +199,9 @@ class ModelManager:
             import onnxruntime as ort
         except ImportError as exc:  # noqa: BLE001 - one actionable message
             raise ToolInputError(
-                "onnxruntime is not installed; install the AI extra "
-                "(pip install 'spatial-intelligence[ai]') to run local models"
+                "onnxruntime is missing from this install, so local models cannot run; "
+                "reinstall spatial-intelligence (it ships with the app) or install "
+                "onnxruntime directly"
             ) from exc
 
         options = _session_options()

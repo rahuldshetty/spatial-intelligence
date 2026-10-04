@@ -18,6 +18,7 @@ from typing import Any
 from ..contracts.errors import RuntimeNotBoundError, ToolInputError
 from ..contracts.progress import NULL_REPORTER, Reporter
 from ..workspace import Workspace
+from ..workspace.files import MAX_READ_BYTES
 
 
 def _notify(hook: Callable[[], None] | None) -> None:
@@ -70,6 +71,8 @@ class ToolRuntime:
     run_id: str | None = None
     approved: bool = False
     services: dict[str, Any] = field(default_factory=dict)
+    #: Bytes one read may hand the model; derived from the context window.
+    max_read_bytes: int = MAX_READ_BYTES
 
     def service(self, key: str, factory: Callable[[], Any]) -> Any:
         """Return this session's instance of ``key``, creating it on first use.

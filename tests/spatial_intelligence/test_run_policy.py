@@ -30,6 +30,7 @@ from spatial_intelligence.agent.runner import (
     MAX_BACKOFF_SECONDS,
     MAX_RETRY_AFTER_SECONDS,
     describe_run_error,
+    is_context_overflow_error,
     is_transient_run_error,
     latest_plan_items,
     retry_delay,
@@ -51,6 +52,41 @@ class TransientErrorTests(unittest.TestCase):
         self.assertFalse(is_transient_run_error(ModelHTTPError(400, "model")))
         self.assertFalse(is_transient_run_error(UnexpectedModelBehavior("bad tool name")))
         self.assertFalse(is_transient_run_error(ValueError("application failure")))
+
+
+class ContextOverflowTests(unittest.TestCase):
+    """Telling a provider's length refusal apart from any other failure.
+
+    Compaction already targets half the window before every request, so a refusal
+    means the window was wrong for this endpoint — worth saying plainly instead of
+    reporting the provider's raw text as a failed run.
+    """
+
+    def test_the_wordings_providers_use_are_recognised(self):
+        messages = (
+            "This model's maximum context length is 128000 tokens. However, your "
+            "messages resulted in 131067 tokens.",
+            "context_length_exceeded",
+            "Input is too long for the requested model.",
+            "prompt is too long: 210000 tokens > 200000 maximum",
+            "too many tokens; please reduce the length of the messages",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertTrue(
+                    is_context_overflow_error(ModelHTTPError(400, message))
+                )
+
+    def test_an_unrelated_failure_is_not_read_as_an_overflow(self):
+        for error in (
+            ModelHTTPError(500, "upstream is down"),
+            ModelHTTPError(400, "invalid tool schema"),
+            ModelAPIError("model", "connection reset by peer"),
+            UnexpectedModelBehavior("the model produced no output"),
+            ValueError("bad shape"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                self.assertFalse(is_context_overflow_error(error))
 
 
 class RetryDelayTests(unittest.TestCase):

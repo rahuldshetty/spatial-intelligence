@@ -168,6 +168,23 @@ CAPABILITIES: tuple[Capability, ...] = (
         tools=("ai_models", "ai_pull_model", "ai_unload_model", "detect_objects"),
     ),
     Capability(
+        id="ai.sandbox-packages",
+        title="Heavy geospatial AI libraries in the sandbox",
+        summary=(
+            "When installed as the geoai extra, run_python can import torchgeo, "
+            "terratorch and torch: multispectral pretrained backbones, EO "
+            "foundation models, dataset/sampler plumbing. skill() maps each "
+            "package's API and ai_fetch_model pulls weights into .models."
+        ),
+        keywords=(
+            "torchgeo", "terratorch", "torch", "prithvi", "satmae", "fine-tune",
+            "training", "foundation model", "pretrained", "weights", "multispectral",
+            "sentinel-2", "sampler", "datamodule", "lightning", "skill", "api",
+        ),
+        implementation="backend (python sandbox; optional geoai extra)",
+        tools=("run_python", "skill", "python_help", "ai_fetch_model"),
+    ),
+    Capability(
         id="python.execution",
         title="Python sandbox",
         summary="Run Python snippets for data processing (pandas, geopandas, rasterio, …) and page the output.",

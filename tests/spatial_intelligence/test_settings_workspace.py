@@ -22,6 +22,8 @@ DEFAULT_SETTINGS = {
     "theme": "light",
     "dangerous_mode": False,
     "max_retries": 3,
+    "max_requests": 7,
+    "context_window": 0,
     "record_agent_steps": True,
 }
 
@@ -80,6 +82,49 @@ class DataRootTestCase(unittest.TestCase):
         self.addCleanup(patch_home.stop)
 
 
+class AppRootFallbackTests(unittest.TestCase):
+    """The XDG fallback, used by an installed or frozen app rather than a checkout."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        base = Path(self._tmp.name)
+        self.xdg = base / "share"
+        self.xdg.mkdir()
+        self.package = base / "site-packages" / "spatial_intelligence"
+        self.package.mkdir(parents=True)
+        self.addCleanup(self._tmp.cleanup)
+
+        # An empty GEOAI_HOME exercises the XDG branch, and the package root is
+        # redirected to a directory that is not a checkout.
+        environment = patch.dict(
+            os.environ, {"XDG_DATA_HOME": str(self.xdg), "GEOAI_HOME": ""}, clear=False
+        )
+        environment.start()
+        self.addCleanup(environment.stop)
+        package_root = patch.object(env, "_PACKAGE_ROOT", self.package)
+        package_root.start()
+        self.addCleanup(package_root.stop)
+
+    def test_a_fresh_install_uses_the_new_name(self):
+        self.assertEqual(env.app_root(), self.xdg / "spatial-intelligence")
+
+    def test_an_install_predating_the_rename_keeps_its_data_root(self):
+        (self.xdg / "geo-ai").mkdir()
+
+        self.assertEqual(env.app_root(), self.xdg / "geo-ai")
+
+    def test_the_new_name_wins_once_it_exists(self):
+        (self.xdg / "geo-ai").mkdir()
+        (self.xdg / "spatial-intelligence").mkdir()
+
+        self.assertEqual(env.app_root(), self.xdg / "spatial-intelligence")
+
+    def test_a_checkout_still_writes_beside_its_sources(self):
+        (self.package / "workspaces").mkdir()
+
+        self.assertEqual(env.app_root(), self.package)
+
+
 class EnvTests(DataRootTestCase):
     env_vars = {"GEOAI_MODEL": "openai:gpt-4o-mini", "GEOAI_MAX_RETRIES": "3"}
 
@@ -122,6 +167,28 @@ class EnvTests(DataRootTestCase):
             self.assertEqual(env.max_retries(), 5)
         with patch.dict(os.environ, {"GEOAI_MAX_RETRIES": "  "}):
             self.assertEqual(env.max_retries(), 5)
+
+    def test_max_requests_defaults_and_clamps(self):
+        self.assertEqual(env.max_requests(), 200)
+
+        with patch.dict(os.environ, {"GEOAI_MAX_REQUESTS": "0"}):
+            self.assertEqual(env.max_requests(), 1)
+        with patch.dict(os.environ, {"GEOAI_MAX_REQUESTS": "250"}):
+            self.assertEqual(env.max_requests(), 250)
+        with patch.dict(os.environ, {"GEOAI_MAX_REQUESTS": "oops"}):
+            self.assertEqual(env.max_requests(), 200)
+        with patch.dict(os.environ, {"GEOAI_MAX_REQUESTS": "  "}):
+            self.assertEqual(env.max_requests(), 200)
+
+    def test_context_window_defaults_to_resolving_it_and_clamps(self):
+        self.assertEqual(env.context_window(), 0)  # 0 = resolve from the model id
+
+        with patch.dict(os.environ, {"GEOAI_CONTEXT_WINDOW": "128000"}):
+            self.assertEqual(env.context_window(), 128000)
+        with patch.dict(os.environ, {"GEOAI_CONTEXT_WINDOW": "-5"}):
+            self.assertEqual(env.context_window(), 0)
+        with patch.dict(os.environ, {"GEOAI_CONTEXT_WINDOW": "oops"}):
+            self.assertEqual(env.context_window(), 0)
 
     def test_a_shadowed_env_file_value_is_reported(self):
         path = self.home / ".env"
@@ -254,7 +321,11 @@ class EnvTests(DataRootTestCase):
 
 
 class SettingsPrefsTests(DataRootTestCase):
-    env_vars = {"GEOAI_MODEL": "openai:gpt-4o-mini", "GEOAI_MAX_RETRIES": "3"}
+    env_vars = {
+        "GEOAI_MODEL": "openai:gpt-4o-mini",
+        "GEOAI_MAX_RETRIES": "3",
+        "GEOAI_MAX_REQUESTS": "7",
+    }
 
     def test_first_run_defaults_come_from_the_environment(self):
         self.assertEqual(prefs.load_settings(), DEFAULT_SETTINGS)
@@ -278,6 +349,8 @@ class SettingsPrefsTests(DataRootTestCase):
                 "theme": "dark",
                 "dangerous_mode": True,
                 "max_retries": 4,
+                "max_requests": 7,
+                "context_window": 0,
                 "record_agent_steps": False,
             },
         )
@@ -291,6 +364,20 @@ class SettingsPrefsTests(DataRootTestCase):
 
         self.assertEqual(corrected["theme"], "light")
         self.assertEqual(corrected["max_retries"], 1)
+        self.assertEqual(corrected["max_requests"], 7)
+        self.assertEqual(
+            prefs.save_settings({"max_requests": 0})["max_requests"], 1
+        )
+        self.assertEqual(
+            prefs.save_settings({"max_requests": "many"})["max_requests"], 7
+        )
+        self.assertEqual(prefs.save_settings({"context_window": -1})["context_window"], 0)
+        self.assertEqual(
+            prefs.save_settings({"context_window": "128000"})["context_window"], 128000
+        )
+        self.assertEqual(
+            prefs.save_settings({"context_window": "wide"})["context_window"], 0
+        )
         self.assertEqual(prefs.save_settings({"max_retries": -9})["max_retries"], 1)
         self.assertEqual(prefs.save_settings({"max_retries": "many"})["max_retries"], 3)
         self.assertEqual(

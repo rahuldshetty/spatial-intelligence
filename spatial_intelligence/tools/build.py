@@ -25,6 +25,7 @@ from .packs.layers import LayersPack
 from .packs.python_ import PythonPack
 from .packs.raster import RasterPack
 from .packs.segmentation import SegmentationPack
+from .packs.skills import SkillsPack
 from .packs.vector import VectorPack
 from .registry import PLAN_MUTATION_TAG, ToolRegistry
 from .runtime import ToolRuntime
@@ -96,6 +97,7 @@ def default_registry(runtime: ToolRuntime) -> ToolRegistry:
     registry.add_pack(SegmentationPack, runtime)
     registry.add_pack(DetectionPack, runtime)
     registry.add_pack(PythonPack, runtime)
+    registry.add_pack(SkillsPack, runtime)
     register_external_tools(registry)
     return registry
 

@@ -1,0 +1,18 @@
+{
+  "built_at": "2026-10-04T17:04:36+00:00",
+  "files": {
+    "datamodules.catalog.md": "0a3b9982f1d9a6305e61fd55c35143e3b8fe5b7145eea86ad8bda8f5f07884dc",
+    "datasets.catalog.md": "3739ad40fa8cf751c6faf7554c62be92ac2021a71845cdd2439eced858320fb1",
+    "index.md": "6e093f3a5bf5b1f2b5a8137ab7050ce130f47272cd0ad4991a0e269138378f1d",
+    "losses.md": "6b6bbba88b6001f53321c3473dcb9f1b4833a8341b3ec669c889d4ea48462016",
+    "main.md": "fad300bdd023b7bf0e81201e08cc92ab942c301a76adfdb77451efc75317738a",
+    "models.md": "8365470afc74e8b1290953510aa0f41bce4d7837a7fb64dd694bd7d060f64ece",
+    "samplers.md": "740f2c0ce44247774120f64d749ca81b50ad153f67456d4b9fe1faf9a4db134a",
+    "trainers.md": "ee4948f430e6843b54b3557bb0110b2d994eca9ec723b51768d6a20d876de688",
+    "transforms.md": "71ad4910477ca9e03d00476fe1fb4b22382eb6532817d1ab7bbc068fccaa94e3"
+  },
+  "generator": "spatial_intelligence.pythonruntime.spec",
+  "package": "torchgeo",
+  "root": "C:\\Files\\QGIS\\geo-ai\\spatial_intelligence\\skills\\torchgeo",
+  "version": "0.8.1"
+}

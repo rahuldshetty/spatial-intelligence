@@ -110,6 +110,31 @@ button {
   padding: 12px;
 }
 
+/* Follow-output toggle: sits under the panel it scrolls, above the status bar. */
+.follow-button {
+  flex-shrink: 0;
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.follow-button:hover {
+  color: var(--text);
+}
+
+.follow-button.active {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
 /* -- status bar ----------------------------------------------------------- */
 
 #status-bar {

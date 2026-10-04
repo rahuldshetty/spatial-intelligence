@@ -30,6 +30,7 @@ import json
 import os
 import threading
 import traceback
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -43,7 +44,9 @@ import shapely
 import skimage
 import xarray
 
+from ..ai.store import models_dir
 from ..workspace import Workspace
+from . import packages
 from .output import OutputStore
 from .sandbox import guard
 
@@ -95,6 +98,48 @@ class _ConfinedWorkspace:
         return str(self._ws.maps)
 
 
+class _ModelCache:
+    """Read-only view of the model cache, bound in run_python as ``models``.
+
+    Weights arrive through ``ai_fetch_model`` (which verifies hashes) or through a
+    library's own downloader, which ``HF_HOME``/``TORCH_HOME`` already point at
+    this directory. Nothing here fetches: the sandbox has no network.
+    """
+
+    def dir(self, repo: str = "") -> str:
+        """Return the cache root, or one repository's directory."""
+        root = models_dir()
+        return str(root / repo) if repo else str(root)
+
+    def path(self, repo: str, filename: str = "") -> str:
+        """Return a file's absolute path, raising when it is not downloaded.
+
+        A fetched file lives under its revision directory
+        (``<repo>/<revision>/<file>``), so a path that names only the repository
+        is looked up one level down before it is called missing.
+        """
+        target = models_dir() / repo
+        if filename:
+            target = target / filename
+        if filename and not Path(target).exists():
+            matches = sorted((models_dir() / repo).glob(f"*/{filename}"))
+            if matches:
+                target = matches[-1]
+        if not Path(target).exists():
+            raise FileNotFoundError(
+                f"{target} is not in the model cache; fetch it first with "
+                f"ai_fetch_model({repo!r}, filenames={[filename]!r})"
+            )
+        return str(target)
+
+    def list(self, repo: str = "") -> list[str]:
+        """List cached repositories, or the files inside one."""
+        root = Path(self.dir(repo))
+        if not root.is_dir():
+            return []
+        return sorted(entry.name for entry in root.iterdir())
+
+
 class PythonExecutor:
     """Runs ``run_python`` snippets against one workspace.
 
@@ -113,6 +158,7 @@ class PythonExecutor:
         """Return the globals a snippet runs against (fresh per execution)."""
         return {
             "ws": _ConfinedWorkspace(self.workspace),
+            "models": _ModelCache(),
             "rasterio": rasterio,
             "rioxarray": rioxarray,
             "gpd": gpd,
@@ -125,15 +171,19 @@ class PythonExecutor:
             "scipy": scipy,
             "rio_cogeo": rio_cogeo,
             "json": json,
+            **packages.bindings(),
         }
 
-    def run(self, code: str) -> str:
+    def run(self, code: str, timeout: float | None = None) -> str:
         """Execute ``code`` and return the truncated preview of its output.
 
         The full output is kept in :attr:`output` for ``inspect_output`` /
         ``query_output``. A syntax error, a guard violation, a timeout, and a
         raised exception all come back as output text rather than raising.
+        ``timeout`` overrides :data:`TIMEOUT` for one call: a model that takes
+        minutes per tile needs more than the default every-tool budget.
         """
+        limit = TIMEOUT if timeout is None else max(1.0, float(timeout))
         try:
             tree = ast.parse(code)
         except SyntaxError as exc:
@@ -177,7 +227,7 @@ class PythonExecutor:
             os.chdir(self.workspace.root)
             try:
                 thread.start()
-                thread.join(TIMEOUT)
+                thread.join(limit)
             finally:
                 # A timed-out snippet keeps running on an abandoned daemon thread
                 # that may still resolve relative paths, so the cwd stays at the
@@ -187,7 +237,7 @@ class PythonExecutor:
                 if not thread.is_alive():
                     os.chdir(previous_cwd)
         if thread.is_alive():
-            return self.output.store(f"run_python timed out after {int(TIMEOUT)}s")
+            return self.output.store(f"run_python timed out after {int(limit)}s")
 
         stdout = out_buf.getvalue()
         parts: list[str] = []

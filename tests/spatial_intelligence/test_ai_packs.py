@@ -42,7 +42,7 @@ class PackSplitTestCase(unittest.TestCase):
 
         self.assertEqual(
             [spec.name for spec in registry.by_category("ai")],
-            ["ai_models", "ai_pull_model", "ai_unload_model"],
+            ["ai_models", "ai_pull_model", "ai_fetch_model", "ai_unload_model"],
         )
         self.assertEqual(
             [spec.name for spec in registry.by_category("segmentation")], ["segment_image"]

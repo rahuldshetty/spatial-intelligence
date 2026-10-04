@@ -5,11 +5,17 @@ geospatial stack plus basic stdlib (``os``, ``sys``, ``pathlib``, ``shutil``,
 ...), but not subprocess, network, dynamic execution, or raw command calls, so
 the agent stays on the structured, workspace-confined path. Dangerous mode
 (i.e. an approved runtime) bypasses the check entirely.
+
+Optional heavy packages (see :mod:`~spatial_intelligence.pythonruntime.packages`)
+join the allowlist only when they are installed, and a missing one gets its
+install command instead of a flat refusal.
 """
 
 from __future__ import annotations
 
 import ast
+
+from . import packages
 
 #: Module roots the agent may import inside ``run_python`` in safe mode: the
 #: geospatial stack plus basic stdlib (``os``, ``sys``, ``pathlib``, ``shutil``,
@@ -50,6 +56,11 @@ BLOCKED_ATTR_CALLS = frozenset({
 })
 
 
+def allowed_imports() -> frozenset[str]:
+    """The core stack plus whatever optional packages this machine has."""
+    return ALLOWED_IMPORTS | packages.optional_roots()
+
+
 def dotted_name(node: ast.AST) -> str | None:
     """Reconstruct an attribute chain (e.g. ``os.system``) from an AST node."""
     if isinstance(node, ast.Name):
@@ -61,6 +72,15 @@ def dotted_name(node: ast.AST) -> str | None:
     return None
 
 
+def _reject(root: str, *, from_import: bool = False) -> str:
+    """Return the message for an import of ``root`` that safe mode refuses."""
+    missing = packages.import_error(root)
+    if missing:
+        return missing
+    verb = "import from" if from_import else "import of"
+    return f"{verb} {root!r} is not allowed in run_python"
+
+
 def guard(tree: ast.Module) -> str | None:
     """Return a violation message, or ``None`` if the code is allowed in safe mode.
 
@@ -70,14 +90,15 @@ def guard(tree: ast.Module) -> str | None:
     path. Dangerous mode bypasses this entirely. A hostile process cannot be
     contained by in-process ``exec``; that requires OS isolation.
     """
+    permitted = allowed_imports()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[0] not in ALLOWED_IMPORTS:
-                    return f"import of {alias.name!r} is not allowed in run_python"
+                if alias.name.split(".")[0] not in permitted:
+                    return _reject(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.module is not None and node.module.split(".")[0] not in ALLOWED_IMPORTS:
-                return f"import from {node.module!r} is not allowed in run_python"
+            if node.module is not None and node.module.split(".")[0] not in permitted:
+                return _reject(node.module, from_import=True)
         elif isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Name) and func.id in BLOCKED_CALLS:
@@ -88,4 +109,11 @@ def guard(tree: ast.Module) -> str | None:
     return None
 
 
-__all__ = ["ALLOWED_IMPORTS", "BLOCKED_ATTR_CALLS", "BLOCKED_CALLS", "dotted_name", "guard"]
+__all__ = [
+    "ALLOWED_IMPORTS",
+    "BLOCKED_ATTR_CALLS",
+    "BLOCKED_CALLS",
+    "allowed_imports",
+    "dotted_name",
+    "guard",
+]

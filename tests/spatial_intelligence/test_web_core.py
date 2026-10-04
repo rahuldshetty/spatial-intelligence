@@ -863,6 +863,95 @@ await scenario("map", async () => {
   eq("map.error_surface", [errorNode.style.display, errorNode.textContent], ["block", "Map error: boom"]);
 });
 
+await scenario("scroll", async () => {
+  const scroll = await import(webUrl("scroll.js"));
+
+  // The shell rebuilds the panel; earlier scenarios left theirs behind, and the
+  // module finds the live one by id.
+  for (const stale of document.querySelectorAll("#tab-content")) stale.remove();
+
+  const panel = document.createElement("div");
+  panel.setAttribute("id", "tab-content");
+  panel.scrollHeight = 1000;
+  panel.clientHeight = 200;
+  document.body.append(panel);
+
+  eq("scroll.starts_off", scroll.isFollowing(), false);
+
+  const button = scroll.followButton();
+  eq(
+    "scroll.button_starts_off",
+    [button.textContent, button.getAttribute("aria-pressed")],
+    ["Follow output", "false"]
+  );
+
+  // Following is the reader's choice: a scroll while it is off changes nothing.
+  panel.scrollTop = 0;
+  panel.dispatch("scroll", {});
+  eq("scroll.ignores_scroll_while_off", scroll.isFollowing(), false);
+
+  button.click();                            // turn it on: go to the bottom now
+  eq("scroll.button_turns_it_on", [scroll.isFollowing(), button.getAttribute("aria-pressed")], [true, "true"]);
+  eq("scroll.jump_goes_to_the_bottom", panel.scrollTop, 1000);
+
+  panel.scrollHeight = 1200;                 // new content arrives
+  scroll.hold();
+  eq("scroll.follows_new_content", panel.scrollTop, 1200);
+
+  panel.scrollTop = 300;                     // reader scrolled up to read
+  panel.dispatch("scroll", {});
+  eq("scroll.stops_when_scrolled_away", scroll.isFollowing(), false);
+  eq("scroll.button_reflects_the_stop", button.textContent, "Follow output");
+  panel.scrollHeight = 1400;
+  scroll.hold();
+  eq("scroll.keeps_the_readers_place", panel.scrollTop, 300);
+
+  button.click();                            // clicking again takes them back down
+  eq("scroll.button_returns_to_the_bottom", [scroll.isFollowing(), panel.scrollTop], [true, 1400]);
+
+  // Our own write is followed by more content before its scroll event lands, so
+  // the event reports a position that is no longer the bottom.
+  panel.scrollHeight = 2000;
+  scroll.hold();
+  eq("scroll.write_lands_at_the_bottom", panel.scrollTop, 2000);
+  panel.scrollHeight = 2600;
+  panel.dispatch("scroll", {});              // the event our own write produced
+  eq("scroll.own_write_does_not_stop_following", scroll.isFollowing(), true);
+  panel.scrollHeight = 3000;
+  scroll.hold();
+  eq("scroll.still_following_after_its_own_event", panel.scrollTop, 3000);
+
+  panel.scrollTop = 600;                     // the reader moves again
+  panel.dispatch("scroll", {});
+  eq("scroll.still_yields_to_the_reader", scroll.isFollowing(), false);
+
+  // The shell swaps the panel on every render; following must survive that.
+  button.click();
+  const replacement = document.createElement("div");
+  replacement.setAttribute("id", "tab-content");
+  replacement.scrollHeight = 4000;
+  replacement.clientHeight = 200;
+  panel.replaceWith(replacement);
+  scroll.scrollTo(replacement, 0);           // a stale position restored by the app
+  eq("scroll.own_restore_returns_to_the_bottom", [scroll.isFollowing(), replacement.scrollTop], [true, 4000]);
+  replacement.dispatch("scroll", {});
+  eq("scroll.own_restore_keeps_following", scroll.isFollowing(), true);
+
+  scroll.unfollow();
+  scroll.scrollTo(replacement, 700);         // a restore while reading history
+  replacement.dispatch("scroll", {});
+  eq(
+    "scroll.restore_while_reading_keeps_the_place",
+    [replacement.scrollTop, scroll.isFollowing()],
+    [700, false]
+  );
+
+  const short = document.createElement("div");
+  short.scrollHeight = 100;
+  short.clientHeight = 200;
+  check("scroll.short_content_counts_as_bottom", scroll.atBottom(short) === true);
+});
+
 console.log(JSON.stringify({ checks, details, gated }));
 """
 
@@ -910,6 +999,9 @@ class FrontendCoreTests(unittest.TestCase):
 
     def test_map_bridge(self) -> None:
         self.assert_group("map.")
+
+    def test_scroll_following(self) -> None:
+        self.assert_group("scroll.")
 
     def test_shell_and_module_exports(self) -> None:
         if not self.report.get("gated"):

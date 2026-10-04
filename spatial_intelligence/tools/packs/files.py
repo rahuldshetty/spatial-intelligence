@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...contracts.effects import Effect
+from ...contracts.errors import ToolInputError
 from ...workspace import files as fileops
 from ..runtime import ToolRuntime
 from ..spec import ToolKind, pack, tool
@@ -35,22 +36,26 @@ class FilesPack:
     def read_file(
         self,
         path: str,
-        max_bytes: int = 1_000_000,
+        max_bytes: int | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> str:
         """Read a UTF-8 text file from the workspace (errors replaced).
 
-        Reads the whole file by default, refusing anything larger than
-        ``max_bytes``. For large files (e.g. Sentinel-1 annotation XML), read a
-        byte range instead: ``offset`` is the 0-based byte to start at, ``limit``
-        the max bytes to return (``None`` = to end of file). ``max_bytes`` still
-        caps the returned slice.
+        ``max_bytes`` defaults to this deployment's read cap (a slice of the
+        context window) and may only lower it. For a large file, read a byte
+        range instead: ``offset`` is the 0-based byte, ``limit`` the max bytes.
         """
+        cap = self._rt.max_read_bytes
+        if max_bytes is not None and max_bytes > cap:
+            raise ToolInputError(
+                f"max_bytes {max_bytes:,} is above this deployment's read cap of "
+                f"{cap:,} bytes; read a slice with offset/limit instead"
+            )
         return fileops.read_text(
             self._rt.workspace,
             path,
-            max_bytes=max_bytes,
+            max_bytes=cap if max_bytes is None else max_bytes,
             offset=offset,
             limit=limit,
         )

@@ -3,7 +3,7 @@
 Data, not behaviour: adding a model is an entry here plus a pipeline for its
 architecture, never a change to the store or the manager. Each entry pins the
 upstream revision — HF revisions are immutable, so a pinned one cannot change
-under a verified download — and every file by sha256 and size.
+under a verified download — and every file by hash and size.
 
 Tasks are what the catalog is organised around, because they are what the tools
 are: a ``segmentation`` model takes prompts and returns masks, a ``detection``
@@ -23,11 +23,16 @@ from ..contracts.errors import ToolInputError
 
 @dataclass(frozen=True, slots=True)
 class ModelFile:
-    """One file of a model revision, pinned by hash and size."""
+    """One file of a model revision, pinned by hash and size.
+
+    ``sha256`` is the LFS object id (the Hub publishes it for LFS files only);
+    ``sha1`` is the git blob id, which every file has.
+    """
 
     path: str
     sha256: str
     size: int
+    sha1: str = ""
 
 
 @dataclass(frozen=True, slots=True)

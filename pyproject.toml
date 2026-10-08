@@ -61,15 +61,13 @@ Issues = "https://github.com/spatialint-org/spatial-intelligence/issues"
 # and a CUDA machine needs torch from the CUDA index rather than the CPU wheel a
 # plain dependency would pin — so this stays something the user opts into, with
 # the index they actually want. `pip install -e ".[geoai]"` takes the CPU wheel.
-# terratorch's torchgeo pin forces the version split: 1.2.12+ demands
-# torchgeo>=0.9, and torchgeo 0.9 is Python 3.12+, so 3.11 stays on the last
-# unpinned terratorch.
+# terratorch 1.2.x pins torchgeo<0.10; torchgeo 0.9 is py3.12+, so 3.11 keeps
+# terratorch<1.2.12 and torchgeo 0.8.
 geoai = [
   "torch>=2.2",
   "terratorch>=1.2,<1.2.12; python_version < '3.12'",
   "terratorch>=1.2.12; python_version >= '3.12'",
-  "torchgeo>=0.8,<0.9; python_version < '3.12'",
-  "torchgeo>=0.10; python_version >= '3.12'",
+  "torchgeo>=0.8,<0.10",
   "torchvision",
   "timm",
   "huggingface_hub",

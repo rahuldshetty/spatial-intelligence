@@ -85,8 +85,8 @@ Everything the app presents as built in — including local segmentation and obj
 detection on ONNX Runtime — installs with the base package. The `geoai` extra is
 deliberately the only extra: `torch` alone is a 124 MB wheel and far more
 installed, and a CUDA machine wants torch from the CUDA index rather than the CPU
-wheel a plain dependency would pin, so it stays opt-in. It takes current torchgeo
-on Python 3.12+ and the last compatible releases on 3.11.
+wheel a plain dependency would pin, so it stays opt-in. It takes the newest
+torchgeo terratorch allows: 0.9 on Python 3.12+, 0.8 on 3.11.
 
 GDAL ships inside rasterio; the `gdal` PyPI package (the `osgeo` bindings) is not
 used and cannot be installed from a wheel.

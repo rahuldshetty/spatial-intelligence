@@ -12,7 +12,9 @@ drawn shape.
 
 import { createWorkspace, listWorkflows } from "../api.js";
 import { closeDialog, el, openDialog, toast } from "../dom.js";
-import { applySnapshot } from "../store.js";
+// `state` is the wizard's own draft inside this module, so the store comes in
+// under a name that cannot be shadowed by it.
+import { applySnapshot, state as appState } from "../store.js";
 import { buildField } from "./fields.js";
 import { workflowArt } from "./workflow-art.js";
 
@@ -132,10 +134,38 @@ export function openWorkflowDialog() {
         return row;
       }
 
+      // Name rules mirror the server's: a name is a directory, so it may not be
+      // empty, may not hold a path separator, and may not collide with one that
+      // is already there ("New" must never open an old workspace).
+      function nameProblem(name) {
+        if (!name) return "Please enter a workspace name.";
+        if (name.length > 64) return "A workspace name can be at most 64 characters.";
+        if (name.startsWith(".")) return "A workspace name cannot start with a dot.";
+        const reserved = Array.from(new Set(name.match(/[\/\\:*?"<>|]/g) || []));
+        if (reserved.length) {
+          return "A workspace name cannot contain " + reserved.join(" ") + ".";
+        }
+        if ((appState.workspaces || []).includes(name)) {
+          return (
+            "A workspace named “" + name + "” already exists — open it, or pick another name."
+          );
+        }
+        return "";
+      }
       // -- step 1: name + type -------------------------------------------
       const typeError = el("div", { class: "interaction-error" });
       errors.type = typeError;
-      const nameInput = el("input", { type: "text", placeholder: "workspace name" });
+      const nameInput = el("input", {
+        type: "text",
+        placeholder: "workspace name",
+        // A name the browser remembers is how an old workspace gets recreated
+        // by accident: the field must start empty every time.
+        autocomplete: "off",
+        spellcheck: "false",
+      });
+      nameInput.addEventListener("input", () => {
+        typeError.textContent = nameProblem(nameInput.value.trim());
+      });
       const cards = el("div", { class: "wizard-cards" });
       cards.append(el("p", { class: "wizard-hint", text: "Loading workflows…" }));
 
@@ -217,8 +247,9 @@ export function openWorkflowDialog() {
         if (error) error.textContent = "";
         if (key === "type") {
           const name = nameInput.value.trim();
-          if (!name) {
-            if (error) error.textContent = "Please enter a workspace name.";
+          const problem = nameProblem(name);
+          if (problem) {
+            if (error) error.textContent = problem;
             return null;
           }
           state.name = name;

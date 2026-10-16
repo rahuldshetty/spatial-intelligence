@@ -9,6 +9,7 @@ queue on a single worker thread.
 
 from __future__ import annotations
 
+import shutil
 import threading
 import traceback
 
@@ -20,7 +21,7 @@ from ..ai import profiles
 from ..contracts.errors import ToolInputError
 from ..map.bridge import reset_bridge
 from ..settings import prefs
-from ..settings.env import DEFAULT_MODEL, list_workspaces
+from ..settings.env import DEFAULT_MODEL, list_workspaces, workspace_root
 from ..tools.runtime import ToolRuntime, bind
 from ..workflows import library
 from .bus import EventBus
@@ -150,12 +151,42 @@ class AppState:
     def new_workspace(
         self, name: str, workflow: str = "", params: dict | None = None
     ) -> dict:
-        """Create a workspace directory, open it, and seed a workflow's cells."""
+        """Create a workspace directory, open it, and seed a workflow's cells.
+
+        The workflow's answers are checked *before* anything is written, so a
+        model that cannot do the task or a place name that does not resolve is a
+        plain error rather than a directory that has to be rolled back.
+        """
+        spec = None
+        if workflow and workflow != "blank":
+            spec = workflows.get(workflow)
+            # Renders the prompt (and validates the model and the area of
+            # interest) without touching the workspace that does not exist yet.
+            workflows.prompt_text(spec, params or {}, verdict=self._model_verdict)
         with self.lock:
             self.workspaces.new(name)
-        self.open_workspace(name)
-        if workflow and workflow != "blank":
-            self.apply_workflow(workflow, params or {})
+        try:
+            self.open_workspace(name)
+            if spec is not None:
+                workflows.seed(
+                    self.workspaces.workspace,
+                    self.notebook,
+                    spec,
+                    params or {},
+                    verdict=self._model_verdict,
+                )
+                return self.snapshot()
+        except Exception:
+            with self.lock:
+                self.workspaces.close()
+                self.notebook.close()
+                self.jobs.clear()
+                self.services.unbind()
+            # Only ever reached when something failed *after* the directory was
+            # created by this call: `new` refuses an existing name, so nothing
+            # here can hold a user's work.
+            shutil.rmtree(workspace_root(name), ignore_errors=True)
+            raise
         return self.snapshot()
 
     def apply_workflow(self, workflow_id: str, params: dict) -> dict:

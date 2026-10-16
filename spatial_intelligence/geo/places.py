@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 import urllib.request
+from functools import lru_cache
 
 from ..contracts.errors import ToolInputError
 
@@ -30,6 +31,14 @@ def geocode(place: str) -> dict:
     query = " ".join(str(place or "").split())
     if not query:
         raise ToolInputError("place must not be empty")
+    # One lookup per name per process: the wizard resolves an AOI once for the
+    # check and once for the prompt, and a name does not move.
+    return dict(_lookup(query))
+
+
+@lru_cache(maxsize=64)
+def _lookup(query: str) -> dict:
+    """Query Nominatim once for ``query`` and shape the answer."""
     url = NOMINATIM_SEARCH + "?" + urllib.parse.urlencode(
         {"q": query, "format": "jsonv2", "limit": MAX_RESULTS}
     )

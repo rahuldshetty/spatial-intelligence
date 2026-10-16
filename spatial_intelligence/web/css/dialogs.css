@@ -821,6 +821,15 @@
   color: var(--text);
 }
 
+/* A class the model cannot produce: a warning, not a blocker — typing nothing
+   is a valid answer, and a promptable model may still find the thing. */
+.model-warning {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--error);
+}
+
 
 /* -- area of interest ----------------------------------------------------- */
 

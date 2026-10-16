@@ -299,10 +299,9 @@ function buildModel(group, field, { disabled, answers }) {
     if (blocked(profile)) return;
     const hasLabels = Array.isArray(profile.labels) && profile.labels.length > 0;
     if (hasLabels) controls.append(buildLabels(profile.labels));
-    const wantTarget = hasLabels
-      ? Boolean(profile.promptable)
-      : Boolean(profile.promptable || profile.supported);
-    if (wantTarget) controls.append(buildTarget(hasLabels));
+    // The free-text box is always offered: with a label list it is how someone
+    // asks for a class the model may know nothing about, which gets a warning.
+    controls.append(buildTarget({ optional: hasLabels, labels: hasLabels ? profile.labels : [] }));
   }
 
   function buildLabels(choices) {
@@ -337,23 +336,32 @@ function buildModel(group, field, { disabled, answers }) {
     return box;
   }
 
-  function buildTarget(optional) {
+  function buildTarget({ optional, labels: known }) {
     const box = el("div", { class: "model-target" });
     const input = el("input", {
       type: "text",
       value: target,
-      placeholder: "What should it find?",
-    });
-    input.addEventListener("input", () => {
-      target = input.value.trim();
+      placeholder: optional ? "a class this model may predict" : "What should it find?",
     });
     box.append(
       el("label", {
         class: "wizard-label",
-        text: optional ? "Extra hint (optional)" : "What should it find?",
+        text: optional ? "Or type a class" : "What should it find?",
       }),
       input
     );
+    // A class the model cannot produce is worth saying out loud at selection
+    // time; typing nothing is fine — the model's own output is the target then.
+    const warning = el("p", { class: "model-warning" });
+    warning.hidden = true;
+    if (known.length) box.append(warning);
+    input.addEventListener("input", () => {
+      target = input.value.trim();
+      if (!known.length) return;
+      const problem = unknownLabel(target, known);
+      warning.textContent = problem;
+      warning.hidden = !problem;
+    });
     return box;
   }
 
@@ -425,6 +433,29 @@ function buildModel(group, field, { disabled, answers }) {
     if (blocked(profile)) return null;
     return { ref: selected, labels: labels.slice(), target };
   };
+}
+
+/** Lower-case a label and drop a trailing plural, so "Cars" matches "car". */
+function normalizeLabel(text) {
+  const cleaned = String(text == null ? "" : text).trim().toLowerCase();
+  if (cleaned.endsWith("s") && !cleaned.endsWith("ss") && cleaned.length > 3) {
+    return cleaned.slice(0, -1);
+  }
+  return cleaned;
+}
+
+/** The warning for a typed class the model does not predict, or "". */
+const MAX_NAMES_IN_WARNING = 8;
+
+function unknownLabel(text, known) {
+  const wanted = normalizeLabel(text);
+  if (!wanted) return "";
+  if (known.some((label) => normalizeLabel(label) === wanted)) return "";
+  const names = known.slice(0, MAX_NAMES_IN_WARNING).join(", ");
+  const rest = known.length > MAX_NAMES_IN_WARNING ? ", …" : "";
+  return (
+    "“" + text + "” is not one of this model's classes — it predicts " + names + rest + "."
+  );
 }
 
 function badge(text, kind) {

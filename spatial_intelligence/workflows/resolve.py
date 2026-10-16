@@ -230,6 +230,93 @@ def model_label(field: InteractionField, ref: str) -> str:
     return ref
 
 
+#: How many of a checkpoint's own classes the prompt names before summarising.
+MAX_PROMPT_LABELS = 24
+#: The standing rule for every model block: the result is the model's output.
+OWN_OUTPUT_RULE = (
+    "Report only what this checkpoint produces — never add classes or objects "
+    "it was not trained on."
+)
+
+
+def normalize_label(text: str) -> str:
+    """Lower-case a label and drop a trailing plural, so "Cars" matches "car"."""
+    cleaned = " ".join(str(text or "").split()).lower()
+    if cleaned.endswith("s") and not cleaned.endswith("ss") and len(cleaned) > 3:
+        return cleaned[:-1]
+    return cleaned
+
+
+def label_mismatch(text: str, labels) -> bool:
+    """Whether ``text`` names something the model's own labels do not cover.
+
+    Used to warn at selection time and to tell the agent not to substitute a
+    class of its own when the requested one is not in the model's vocabulary.
+    """
+    wanted = normalize_label(text)
+    if not wanted:
+        return False
+    return not any(normalize_label(label) == wanted for label in labels or ())
+
+
+def label_summary(labels) -> str:
+    """A checkpoint's own classes, short enough to sit in a prompt."""
+    all_labels = [str(label) for label in labels or ()]
+    shown = all_labels[:MAX_PROMPT_LABELS]
+    hidden = len(all_labels) - len(shown)
+    text = ", ".join(shown)
+    return f"{text} (and {hidden} more)" if hidden > 0 else text
+
+
+def target_lines(profile, labels: list[str], target: str, task: str | None) -> list[str]:
+    """What the analysis should look for, taken from the model — not invented.
+
+    The rule this encodes: an explicit choice wins; with no choice, the target is
+    whatever this checkpoint does, and the result stays inside its vocabulary.
+    """
+    tool = TASK_TOOLS.get(task or "", "")
+    lines: list[str] = []
+    if labels:
+        lines.append("What to find: " + ", ".join(labels))
+        if tool == "detect_objects" and profile.route == "onnx":
+            lines.append(
+                "Report only those: pass them to detect_objects as classes=[...] and "
+                "drop every other detection it makes."
+            )
+        else:
+            lines.append("Report only those classes from the model's output; drop the rest.")
+    elif target:
+        lines.append("What to find: " + target)
+        if profile.labels and label_mismatch(target, profile.labels):
+            lines.append(
+                "That is not one of this checkpoint's classes: it predicts "
+                + label_summary(profile.labels)
+                + ". Say so instead of substituting a class of your own."
+            )
+        elif profile.promptable:
+            lines.append(
+                "This model is class-agnostic (it takes prompts), so keep only the "
+                "shapes that match that description and name them as the user did."
+            )
+    elif profile.labels:
+        lines.append(
+            "What to find: the classes this checkpoint predicts — "
+            + label_summary(profile.labels)
+        )
+    elif profile.promptable:
+        lines.append(
+            "What to find: whatever this checkpoint finds on its own; name them by what "
+            "the masks cover, not by classes it cannot produce."
+        )
+    else:
+        lines.append(
+            "What to find: only what this checkpoint predicts — read its own config or "
+            "model card for its classes before running it."
+        )
+    lines.append(OWN_OUTPUT_RULE)
+    return lines
+
+
 def model_value(field: InteractionField, value: object, verdict=None) -> str:
     """Resolve a chosen model into the block a prompt carries.
 
@@ -259,14 +346,7 @@ def model_value(field: InteractionField, value: object, verdict=None) -> str:
 
     labels = [str(label).strip() for label in (raw.get("labels") or []) if str(label).strip()]
     target = " ".join(str(raw.get("target") or "").split())
-    if labels:
-        lines.append("Labels to report: " + ", ".join(labels))
-    elif target:
-        lines.append("What to find: " + target)
-    elif profile.promptable:
-        lines.append("What to find: everything the model can segment on its own")
-    else:
-        lines.append("What to find: every class this model predicts")
+    lines.extend(target_lines(profile, labels, target, field.task))
     runner = runner_line(profile, field.task, ref)
     if runner:
         lines.append(runner)

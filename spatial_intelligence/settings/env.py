@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from ..contracts.errors import ToolInputError
+
 DEFAULT_MODEL = "openai:gpt-4o"
 
 # Repo root: <root>/spatial_intelligence/settings/env.py -> <root>/.
@@ -249,12 +251,46 @@ def server_base_url() -> str:
     return f"http://127.0.0.1:{port}/"
 
 
+#: Characters a workspace name may not contain: the path separators (a name
+#: becomes a directory) and the rest of Windows' reserved set.
+FORBIDDEN_NAME_CHARS = frozenset('/\\:*?"<>|')
+#: Longest workspace name accepted.
+MAX_WORKSPACE_NAME = 64
+
+
+def validate_workspace_name(name: object) -> str:
+    """Return ``name`` cleaned, or raise when it cannot be a directory name.
+
+    A workspace name *is* a path segment under ``<app_root>/workspaces``, so an
+    unchecked one is how a workspace ends up rooted at the workspaces directory
+    itself (empty name) or outside it entirely (``../escape``).
+    """
+    text = " ".join(str(name or "").split())
+    if not text:
+        raise ToolInputError("enter a workspace name")
+    if len(text) > MAX_WORKSPACE_NAME:
+        raise ToolInputError(
+            f"a workspace name can be at most {MAX_WORKSPACE_NAME} characters"
+        )
+    if text.startswith("."):
+        raise ToolInputError("a workspace name cannot start with a dot")
+    reserved = sorted({char for char in text if char in FORBIDDEN_NAME_CHARS})
+    if reserved:
+        raise ToolInputError(
+            "a workspace name cannot contain " + ", ".join(repr(char) for char in reserved)
+        )
+    if any(ord(char) < 32 for char in text):
+        raise ToolInputError("a workspace name cannot contain control characters")
+    return text
+
+
 def workspace_root(name: str) -> Path:
     """Return the absolute workspace root for ``name`` (under ``app_root()``).
 
-    Computed from the data root, never the process CWD.
+    Computed from the data root, never the process CWD. The name is validated
+    here because this is the only place a name turns into a path.
     """
-    return app_root() / "workspaces" / name
+    return app_root() / "workspaces" / validate_workspace_name(name)
 
 
 def list_workspaces() -> list[str]:

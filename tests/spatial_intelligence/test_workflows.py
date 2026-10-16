@@ -107,6 +107,140 @@ class SpecTests(unittest.TestCase):
         self.assertIn("segmentation", str(raised.exception))
 
 
+class TargetTests(unittest.TestCase):
+    """The target comes from the model, never from an invented default."""
+
+    def setUp(self):
+        self.spec = workflows.get("detection")
+        self.field = next(param for param in self.spec.params if param.type == "model")
+
+    def _prompt(self, model, profile):
+        with mock.patch.object(resolve.profiles, "resolve", return_value=profile):
+            return resolve.prompt_text(self.spec, dict(SEGMENT_PARAMS, model=model))
+
+    def test_a_chosen_class_is_the_only_thing_reported(self):
+        text = self._prompt(
+            {"ref": "yolos-tiny", "labels": ["car", "boat"], "target": ""},
+            Profile(
+                ref="yolos-tiny",
+                repo="Xenova/yolos-tiny",
+                route="onnx",
+                tasks=("detection",),
+                labels=("person", "car", "boat"),
+                runnable=True,
+            ),
+        )
+
+        self.assertIn("What to find: car, boat", text)
+        self.assertIn("classes=[...]", text)
+        self.assertIn(resolve.OWN_OUTPUT_RULE, text)
+
+    def test_no_choice_leaves_the_target_to_the_model(self):
+        text = self._prompt(
+            {"ref": "yolos-tiny", "labels": [], "target": ""},
+            Profile(
+                ref="yolos-tiny",
+                repo="Xenova/yolos-tiny",
+                route="onnx",
+                tasks=("detection",),
+                labels=("car", "boat"),
+                runnable=True,
+            ),
+        )
+
+        self.assertIn("What to find: the classes this checkpoint predicts — car, boat", text)
+        self.assertIn(resolve.OWN_OUTPUT_RULE, text)
+        self.assertNotIn("every class", text)
+
+    def test_a_long_label_set_is_summarised(self):
+        labels = tuple(f"class{index}" for index in range(40))
+
+        summary = resolve.label_summary(labels)
+
+        self.assertEqual(summary.count(","), resolve.MAX_PROMPT_LABELS - 1)
+        self.assertIn("(and 16 more)", summary)
+
+    def test_a_typed_class_the_model_lacks_is_called_out(self):
+        text = self._prompt(
+            {"ref": "yolos-tiny", "labels": [], "target": "roads"},
+            Profile(
+                ref="yolos-tiny",
+                repo="Xenova/yolos-tiny",
+                route="onnx",
+                tasks=("detection",),
+                labels=("car", "boat"),
+                runnable=True,
+            ),
+        )
+
+        self.assertIn("What to find: roads", text)
+        self.assertIn("not one of this checkpoint's classes", text)
+        self.assertIn("car, boat", text)
+        self.assertIn("instead of substituting a class of your own", text)
+
+    def test_a_typed_class_the_model_has_is_left_alone(self):
+        text = self._prompt(
+            {"ref": "yolos-tiny", "labels": [], "target": "boats"},
+            Profile(
+                ref="yolos-tiny",
+                repo="Xenova/yolos-tiny",
+                route="onnx",
+                tasks=("detection",),
+                labels=("car", "boat"),
+                runnable=True,
+            ),
+        )
+
+        self.assertIn("What to find: boats", text)
+        self.assertNotIn("not one of this checkpoint's classes", text)
+
+    def test_a_promptable_model_is_described_as_class_agnostic(self):
+        text = self._prompt(
+            {"ref": "slimsam-77", "labels": [], "target": "water"},
+            Profile(
+                ref="slimsam-77",
+                repo="Xenova/slimsam-77-uniform",
+                route="onnx",
+                tasks=("segmentation",),
+                promptable=True,
+                runnable=True,
+            ),
+        )
+
+        self.assertIn("class-agnostic", text)
+        self.assertIn("name them as the user did", text)
+
+    def test_an_unknown_checkpoint_must_be_read_before_it_is_run(self):
+        text = self._prompt(
+            {"ref": "hf:acme/thing", "labels": [], "target": ""},
+            Profile(
+                ref="hf:acme/thing",
+                repo="acme/thing",
+                route="research",
+                tasks=("detection",),
+                runnable=True,
+            ),
+        )
+
+        self.assertIn("read its own config or model card", text)
+        self.assertIn(resolve.OWN_OUTPUT_RULE, text)
+
+    def test_label_matching_tolerates_case_and_plurals(self):
+        # Nothing typed is the "continue as is" case, not a mismatch.
+        self.assertFalse(resolve.label_mismatch("", ("car",)))
+        self.assertFalse(resolve.label_mismatch("Car", ("car", "boat")))
+        self.assertFalse(resolve.label_mismatch("boats", ("car", "boat")))
+        self.assertTrue(resolve.label_mismatch("roads", ("car", "boat")))
+        self.assertTrue(resolve.label_mismatch("cars", ("bus",)))
+
+    def test_the_workflow_prompts_defer_to_the_model(self):
+        detection = workflows.get("detection").prompt
+        segmentation = workflows.get("segmentation").prompt
+
+        self.assertIn("what the model below is trained to detect", detection)
+        self.assertIn("what the model below can find", segmentation)
+
+
 class PromptTests(unittest.TestCase):
     def test_the_prompt_fills_every_placeholder(self):
         text = resolve.prompt_text(workflows.get("segmentation"), SEGMENT_PARAMS)
@@ -185,7 +319,7 @@ class PromptTests(unittest.TestCase):
         ):
             text = resolve.prompt_text(workflows.get("segmentation"), params)
 
-        self.assertIn("Labels to report: car, boat", text)
+        self.assertIn("What to find: car, boat", text)
         self.assertNotIn("ignored", text)
 
     def test_a_model_that_cannot_do_the_task_is_refused_before_the_run(self):
@@ -475,6 +609,52 @@ class WorkflowRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("only Hugging Face", response.json()["detail"])
+
+    def test_creating_the_same_workspace_twice_is_refused(self):
+        first = self.client.post("/api/workspace/new", json={"name": "twice"})
+        self.assertEqual(first.status_code, 200, first.text)
+        self.client.post("/api/cells", json={"kind": "markdown", "source": "mine"})
+        self.client.post("/api/workspace/close")
+
+        second = self.client.post("/api/workspace/new", json={"name": "twice"})
+
+        self.assertEqual(second.status_code, 400, second.text)
+        self.assertIn("already exists", second.json()["detail"])
+        # and it must not have opened the old one either
+        self.assertIsNone(self.client.get("/api/state").json()["active_workspace"])
+
+    def test_a_workspace_name_cannot_be_empty(self):
+        response = self.client.post("/api/workspace/new", json={"name": "   "})
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("enter a workspace name", response.json()["detail"])
+
+    def test_a_workspace_name_cannot_escape_the_data_root(self):
+        for name in ("../escape", "..\\escape", "sub/dir", ".hidden"):
+            with self.subTest(name=name):
+                response = self.client.post("/api/workspace/new", json={"name": name})
+                self.assertEqual(response.status_code, 400, response.text)
+
+    def test_a_failed_create_leaves_no_workspace_behind(self):
+        # The name was free a moment ago, so the user must be able to fix the
+        # mistake and try the same name again.
+        params = dict(SEGMENT_PARAMS)
+        params["model"] = {"ref": "hf:acme/unknown-thing", "target": ""}
+        broken = self.client.post(
+            "/api/workspace/new",
+            json={"name": "retryable", "workflow": "segmentation", "params": params},
+        )
+        self.assertEqual(broken.status_code, 400, broken.text)
+        # The answers are checked before anything is created.
+        self.assertFalse((Path(os.environ["GEOAI_HOME"]) / "workspaces" / "retryable").exists())
+
+        good = self.client.post(
+            "/api/workspace/new",
+            json={"name": "retryable", "workflow": "segmentation", "params": SEGMENT_PARAMS},
+        )
+
+        self.assertEqual(good.status_code, 200, good.text)
+        self.assertEqual(good.json()["active_workspace"], "retryable")
 
 
 if __name__ == "__main__":

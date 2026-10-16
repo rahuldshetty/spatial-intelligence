@@ -19,7 +19,7 @@ from ..pythonruntime import packages
 from .spec import WorkflowSpec
 
 SEGMENTATION_PROMPT = """\
-Segment features in this workspace and show the result on the map.
+Segment what the model below can find in this workspace and show the result on the map.
 
 Model: {model}
 Area of interest: {aoi}
@@ -34,7 +34,7 @@ Extra instructions: {notes}
 """
 
 DETECTION_PROMPT = """\
-Detect objects in this workspace and show them on the map.
+Detect what the model below is trained to detect in this workspace and show the results on the map.
 
 Model: {model}
 Area of interest: {aoi}

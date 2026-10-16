@@ -8,6 +8,7 @@ from pathlib import Path
 from geolibre import Map
 from geolibre import project as geolibre_project
 
+from ..contracts.errors import ToolInputError
 from ..map import document
 from ..settings.env import workspace_root
 from ..workspace import Workspace
@@ -53,8 +54,16 @@ class WorkspaceSession:
         return workspace
 
     def new(self, name: str) -> Workspace:
-        """Create a workspace directory (idempotent) and open it."""
-        Workspace(self._root_for(name)).create()
+        """Create a workspace directory and open it, refusing an existing one.
+
+        Creating over an existing directory would open its old notebook and map
+        instead — "new" has to mean new, so the name is checked first.
+        """
+        root = self._root_for(name)
+        if root.exists():
+            raise ToolInputError(
+                f"a workspace named {name!r} already exists — open it, or pick another name"
+            )
         return self.open(name)
 
     def close(self) -> None:

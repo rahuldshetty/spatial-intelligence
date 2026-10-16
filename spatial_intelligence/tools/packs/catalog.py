@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 from ...contracts.effects import Effect
 from ...contracts.errors import ToolInputError
+from ...geo import places
 from ...geo.catalogs import openaerialmap, stac, vantor
 from ...geo.catalogs.scenes import SceneCache
 from ...map import document, layers
@@ -259,6 +260,16 @@ class CatalogPack:
             "name": layer_name,
             "local_path": rel,
         }
+
+    @tool(effects=frozenset({Effect.READ, Effect.NETWORK}))
+    def geocode(self, place: str) -> dict:
+        """Resolve a place name to the bounding box of an area of interest.
+
+        Use this when the user names a place instead of giving coordinates. The
+        result carries ``bbox`` as ``[west, south, east, north]``, which is what
+        the catalog, raster, and vector tools take.
+        """
+        return places.geocode(place)
 
 
 __all__ = ["CatalogPack"]

@@ -4,7 +4,6 @@
 
 import {
   closeWorkspace,
-  createWorkspace,
   openWorkspace,
   runAll,
   saveWorkspace,
@@ -14,6 +13,7 @@ import { closeDialog, dialogActions, el, openDialog, toast } from "../dom.js";
 import { addCell } from "../pages/cells.js";
 import { applySnapshot, setState, state } from "../store.js";
 import { openSettingsDialog } from "./settings-dialog.js";
+import { openWorkflowDialog } from "./workflow-dialog.js";
 
 const ICON_SAFE =
   '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
@@ -117,18 +117,7 @@ async function toggleDangerous(next) {
 }
 
 function openNewDialog() {
-  openDialog((dialog) => {
-    dialog.append(el("h3", { text: "New workspace" }));
-    const input = el("input", { type: "text", placeholder: "workspace name" });
-    dialog.append(input);
-    dialogActions(dialog, "Create", async () => {
-      const name = input.value.trim();
-      if (!name) return;
-      closeDialog();
-      await runAction(() => createWorkspace(name));
-    });
-    input.focus();
-  });
+  openWorkflowDialog();
 }
 
 function openOpenDialog() {

@@ -12,13 +12,17 @@ from __future__ import annotations
 import threading
 import traceback
 
+from .. import workflows
+from ..agent import verdict
 from ..agent.model import validate_model
 from ..agent.runner import PromptRunner, RunnerHooks
+from ..ai import profiles
 from ..contracts.errors import ToolInputError
 from ..map.bridge import reset_bridge
 from ..settings import prefs
 from ..settings.env import DEFAULT_MODEL, list_workspaces
 from ..tools.runtime import ToolRuntime, bind
+from ..workflows import library
 from .bus import EventBus
 from .jobs import JobRegistry
 from .notebook_session import RUNNABLE_KINDS, NotebookSession
@@ -143,11 +147,49 @@ class AppState:
             repoint_local_rasters(self.workspaces.map, workspace, runtime.file_url)
             return self.snapshot()
 
-    def new_workspace(self, name: str) -> dict:
-        """Create a workspace directory and open it."""
+    def new_workspace(
+        self, name: str, workflow: str = "", params: dict | None = None
+    ) -> dict:
+        """Create a workspace directory, open it, and seed a workflow's cells."""
         with self.lock:
             self.workspaces.new(name)
-        return self.open_workspace(name)
+        self.open_workspace(name)
+        if workflow and workflow != "blank":
+            self.apply_workflow(workflow, params or {})
+        return self.snapshot()
+
+    def apply_workflow(self, workflow_id: str, params: dict) -> dict:
+        """Seed a workflow's answers into the open workspace as its cells.
+
+        The workflow only decides which cells exist and what the prompt says:
+        running it is still an ordinary prompt cell, so the agent, the run
+        queue, traces, and progress are untouched.
+        """
+        with self.lock:
+            workspace = self.workspaces.workspace
+            if workspace is None:
+                raise ToolInputError("open a workspace before adding a workflow")
+            spec = workflows.get(workflow_id)
+            workflows.seed(
+                workspace, self.notebook, spec, params, verdict=self._model_verdict
+            )
+            return self.snapshot()
+
+    def model_profile(self, model_ref: str, task: str = "") -> dict:
+        """Describe one candidate model, for the wizard's up-front check."""
+        profile = profiles.resolve(
+            model_ref,
+            task,
+            verdict=self._model_verdict,
+            hint=library.option_hint(model_ref),
+        )
+        answer = profile.as_dict()
+        answer["supported"] = profile.supports(task)
+        return answer
+
+    def _model_verdict(self, *, ref: str, facts: dict, task: str) -> dict | None:
+        """Ask the session's model about a checkpoint its metadata does not describe."""
+        return verdict.classify(self.settings.get("model", ""), ref, facts, task)
 
     def close_workspace(self) -> dict:
         """Close the open workspace and reset the map and notebook."""

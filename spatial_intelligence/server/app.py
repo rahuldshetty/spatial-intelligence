@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from ..contracts.errors import ToolInputError, WorkspaceError
 from . import deps
 from .assets import WEB_DIR
-from .routers import events, files, state, workspace
+from .routers import events, files, state, workspace, workflows
 
 NO_STORE = {"Cache-Control": "no-store"}
 
@@ -64,6 +64,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Spatial Intelligence", lifespan=_lifespan)
     _register_error_handlers(app)
     app.include_router(state.router)
+    app.include_router(workflows.router)
     app.include_router(workspace.router)
     app.include_router(files.router)
     app.include_router(events.router)

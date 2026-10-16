@@ -208,6 +208,10 @@ def nb_to_cell(nb_cell: dict) -> dict:
         cell["status"] = "waiting_for_input"
     if kind == "prompt" and isinstance(geoai.get("interaction_history"), list):
         cell["interaction_history"] = geoai["interaction_history"]
+    if kind in {"prompt", "tool", "interaction"} and isinstance(geoai.get("workflow"), dict):
+        # The workflow the cell was seeded from, so the UI can show its answers
+        # again after a reload.
+        cell["workflow"] = geoai["workflow"]
     if kind == "interaction":
         if isinstance(geoai.get("interaction"), dict):
             cell["interaction"] = geoai["interaction"]

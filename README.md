@@ -15,7 +15,8 @@ every output is a real file in the workspace you can inspect or reuse.
 - Search and download open imagery: STAC catalogs (Sentinel-2, Landsat, NAIP,
   Sentinel-1, DEMs), Vantor disaster releases, OpenAerialMap.
 - Import local files or folders, or download by URL, into the workspace.
-- Search the web for documentation, provider terms, or current facts.
+- Resolve a place name to an area of interest, and search the web for
+  documentation, provider terms, or current facts.
 
 **🧮 Raster analysis**
 
@@ -42,6 +43,13 @@ every output is a real file in the workspace you can inspect or reuse.
   own inference code, so new models need no new tool.
 - Weights always land in `.models/`, hash-verified. The sandbox itself has no
   network.
+- The wizard searches the Hugging Face Hub for a checkpoint, or takes a pasted
+  repository link, and says **before a run starts** whether that checkpoint can
+  do the task and whether this machine can load it. A model that already
+  predicts classes shows them for you to pick; a promptable one (SAM-style
+  segmentation, zero-shot detection) asks in words what to find. Unknown
+  checkpoints get one small call to your configured model for that verdict,
+  cached for the session.
 
 **🗺️ The map**
 
@@ -78,15 +86,21 @@ uv venv .venv && uv pip install -e .                    # or: python -m venv .ve
 Optional: the research sandbox.
 
 ```bash
-uv pip install -e ".[geoai]"  # torchgeo, terratorch, torch — ~150 MB of wheels
+uv pip install -e ".[geoai]"  # torch, torchgeo, terratorch, transformers — ~200 MB of wheels
 ```
 
-Everything the app presents as built in — including local segmentation and object
-detection on ONNX Runtime — installs with the base package. The `geoai` extra is
-deliberately the only extra: `torch` alone is a 124 MB wheel and far more
-installed, and a CUDA machine wants torch from the CUDA index rather than the CPU
-wheel a plain dependency would pin, so it stays opt-in. It takes the newest
-torchgeo terratorch allows: 0.9 on Python 3.12+, 0.8 on 3.11.
+Everything the app presents as built in — including local segmentation and
+object detection on ONNX Runtime — installs with the base package. The `geoai`
+extra is deliberately the only extra: `torch` alone is a 124 MB wheel and far
+more installed, and a CUDA machine wants torch from the CUDA index rather than
+the CPU wheel a plain dependency would pin, so it stays opt-in. It takes the
+newest torchgeo terratorch allows: 0.9 on Python 3.12+, 0.8 on 3.11.
+
+The extra is also what makes a checkpoint found by the model search runnable:
+`transformers` loads a Hub segmentation or detection model's own classes and
+processor, `torchgeo` and `terratorch` load the geospatial backbones. Without it
+the wizard still lists those checkpoints but says it cannot run them here, and
+names this extra.
 
 GDAL ships inside rasterio; the `gdal` PyPI package (the `osgeo` bindings) is not
 used and cannot be installed from a wheel.
@@ -100,7 +114,13 @@ make dev        # or: .venv/Scripts/python.exe -m spatial_intelligence.server
 The browser opens at `http://127.0.0.1:8000`.
 
 1. **File → New workspace** and give it a name. A workspace is the folder the
-   agent reads and writes.
+   agent reads and writes. Pick a workflow instead of **Blank** — *Segmentation*,
+   *Detection*, or *Change detection* — and the wizard walks through **Type →
+   Configure → Review**: the model (from the ones this build ships with, or a
+   checkpoint you search for on Hugging Face), the area of interest (drawn on the
+   map, taken from the current view, typed as a bounding box, or named), and where
+   the imagery comes from. It writes your answers into two cells: a record of the
+   setup and a prompt that the agent runs, with the answers already filled in.
 2. **Data tab** — import files, or paste a URL to download. Imports are picked up
    by the agent automatically.
 3. **Cells tab → Prompt** and ask for an outcome. For example:

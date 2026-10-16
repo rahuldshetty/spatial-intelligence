@@ -137,6 +137,773 @@
   color: var(--primary);
 }
 
+/* -- passthrough dialog --------------------------------------------------- */
+
+/* The overlay goes click-through so the map behind it stays usable, and it is
+   dark enough that the dialog reads as a dialog rather than floating on the
+   page. */
+#overlay.passthrough {
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+/* The area-of-interest step needs the map itself: the scrim lifts and the
+   wizard docks to the right edge at full height, leaving the map in view. */
+#overlay.passthrough.map-live {
+  background: transparent;
+}
+
+#overlay.passthrough.map-live #dialog.wizard-dialog {
+  width: min(560px, 42vw);
+  height: 100%;
+  max-height: 100%;
+  margin-left: auto;
+  border-radius: 0;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+#overlay.passthrough #dialog {
+  pointer-events: auto;
+  width: min(520px, calc(100vw - 40px));
+}
+
+/* The wizard is a dialog with real chrome: a fixed header, a fixed progress
+   strip, one scrolling body, and a fixed footer. The body is a single column of
+   the dialog's own width, so fields, cards and buttons all share one left edge. */
+#overlay.passthrough #dialog.wizard-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 94vw);
+  /* Fits the content it has, within a band: short steps stay compact, long ones
+     scroll instead of pushing the buttons off the window. */
+  height: auto;
+  min-height: min(520px, 60vh);
+  max-height: min(880px, 92vh);
+  padding: 0;
+  overflow: hidden;
+}
+
+#dialog.wizard-dialog > h3 {
+  margin: 0;
+  padding: 18px 26px;
+  font-size: 15px;
+  border-bottom: 1px solid var(--border);
+}
+
+#dialog.wizard-dialog .wizard-steps {
+  margin: 0;
+  padding: 12px 26px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+/* Step visibility is a class pair in one place: the base rule hides, `.active`
+   shows. A `display` on the base plus a bare `[hidden]` rule is what let every
+   step lay out on top of the others and swallow their clicks. */
+#dialog.wizard-dialog .wizard-step {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+  gap: 18px;
+  padding: 22px 26px;
+}
+
+#dialog.wizard-dialog .wizard-step.active {
+  display: grid;
+}
+
+#dialog.wizard-dialog .wizard-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 26px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.wizard-footer-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* -- workflow wizard ------------------------------------------------------ */
+
+.wizard-label,
+.wizard-section-title {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.wizard-section-title {
+  margin-top: 18px;
+}
+
+/* Inside the wizard the body grid owns the rhythm, so a label hugs its control
+   and nothing adds its own margins. */
+#dialog.wizard-dialog .wizard-label,
+#dialog.wizard-dialog .wizard-section-title,
+#dialog.wizard-dialog .wizard-hint {
+  margin: 0;
+}
+
+#dialog.wizard-dialog .wizard-field {
+  display: grid;
+  gap: 7px;
+}
+
+#dialog.wizard-dialog .interaction-field {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+#dialog.wizard-dialog .interaction-field > legend {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+#dialog.wizard-dialog .interaction-description,
+#dialog.wizard-dialog .interaction-prompt {
+  margin: 0;
+}
+
+/* The body grid owns all vertical rhythm: no widget adds its own top margin. */
+#dialog.wizard-dialog .wizard-cards,
+#dialog.wizard-dialog .model-field,
+#dialog.wizard-dialog .model-options,
+#dialog.wizard-dialog .model-search,
+#dialog.wizard-dialog .model-results,
+#dialog.wizard-dialog .model-profile,
+#dialog.wizard-dialog .model-controls,
+#dialog.wizard-dialog .aoi-modes {
+  margin-top: 0;
+}
+
+.wizard-hint {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.wizard-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-step-chip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.wizard-step-chip .wizard-step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 10.5px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.wizard-step-chip.active {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
+.wizard-step-chip.active .wizard-step-no {
+  color: #fff;
+  background: var(--primary);
+}
+
+.wizard-step-chip.done {
+  color: var(--text-2);
+}
+
+.wizard-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.wizard-heading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wizard-heading-copy strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.wizard-heading-copy .wizard-hint {
+  margin: 0;
+}
+
+.workflow-art {
+  color: var(--primary);
+  flex: none;
+}
+
+.wizard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.wizard-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 150px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.wizard-card:hover {
+  border-color: var(--primary);
+}
+
+.wizard-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+/* The radio is the card's state, not a control to aim at: drawn by hand so it
+   reads the same in both themes. */
+.wizard-card input {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.wizard-card input:checked {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 3.5px var(--primary);
+}
+
+.wizard-card input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.wizard-card .workflow-art {
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.wizard-card.selected .workflow-art {
+  color: var(--primary);
+}
+
+.wizard-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wizard-card-copy strong {
+  font-size: 13px;
+}
+
+.wizard-card-copy small {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wizard-review {
+  margin: 0 0 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.wizard-review dt {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-3);
+}
+
+.wizard-review dt:first-child {
+  margin-top: 0;
+}
+
+.wizard-review dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* -- model picker --------------------------------------------------------- */
+
+/* Fields stop at a readable width inside the wizard, whatever the window is. */
+#dialog.wizard-dialog input[type="text"],
+#dialog.wizard-dialog input[type="number"],
+#dialog.wizard-dialog select {
+  max-width: 380px;
+}
+
+#dialog.wizard-dialog textarea {
+  max-width: 640px;
+}
+
+/* Native checkboxes pick up the accent so label lists read as one control. */
+#dialog.wizard-dialog input[type="checkbox"] {
+  accent-color: var(--primary);
+}
+
+#dialog.wizard-dialog .model-search-input {
+  max-width: 520px;
+}
+
+.model-field {
+  margin-top: 4px;
+}
+
+.model-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+/* Two ways in — the models this build ships with, or one from the Hub — and
+   only the chosen one is on screen, so the step stays readable. */
+.model-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.model-source-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.model-source-pill:has(input:checked) {
+  color: var(--primary);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.model-source-pill input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.model-source-pill input:checked {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 3px var(--primary);
+}
+
+.model-pane {
+  display: none;
+}
+
+.model-pane.active {
+  display: block;
+}
+
+.model-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.model-option:hover {
+  border-color: var(--primary);
+}
+
+.model-option.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.model-option-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.model-option-copy small {
+  color: var(--text-2);
+}
+
+.model-option-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-badge {
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-2);
+  background: var(--surface-3);
+  border-radius: 999px;
+}
+
+.model-badge.route {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.model-badge.warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.model-badge.recommend {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.model-search {
+  margin-top: 10px;
+  max-width: 620px;
+}
+
+.model-status {
+  min-height: 15px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-2);
+  word-break: break-word;
+}
+
+.model-results {
+  display: flex;
+  flex-direction: column;
+  max-width: 620px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.model-result {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  margin: 4px 0;
+  cursor: pointer;
+}
+
+.model-result:hover {
+  border-color: var(--primary);
+}
+
+.model-result.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.model-result-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.model-result-copy strong {
+  font-size: 12.5px;
+  word-break: break-word;
+}
+
+.model-result-copy small {
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.model-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.model-profile {
+  margin-top: 10px;
+  max-width: 720px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.model-profile[hidden] {
+  display: none;
+}
+
+.model-profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.model-verdict {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.model-verdict.good {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.model-verdict.bad {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+.model-error {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--error);
+  background: var(--error-soft);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+}
+
+.model-controls {
+  margin-top: 10px;
+  max-width: 720px;
+}
+
+.model-labels-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-labels-head .wizard-label {
+  flex: 1;
+  margin: 0 0 6px;
+}
+
+.model-label-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.model-label:has(input:checked) {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
+.model-label input {
+  margin: 0;
+}
+
+.model-target input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+
+/* -- area of interest ----------------------------------------------------- */
+
+.aoi-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.aoi-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.aoi-mode:has(input:checked) {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
+/* Same hand-drawn radio as the workflow cards, so the mode pills read alike. */
+.aoi-mode input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.aoi-mode input:checked {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 3px var(--primary);
+}
+
+.aoi-pane[hidden] {
+  display: none;
+}
+
+.aoi-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.aoi-row .aoi-input {
+  flex: 1;
+}
+
+.aoi-button {
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.aoi-button:hover {
+  background: var(--surface-3);
+}
+
+.aoi-status {
+  min-height: 16px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-2);
+  word-break: break-word;
+}
+
 /* -- toast ---------------------------------------------------------------- */
 
 #toast {

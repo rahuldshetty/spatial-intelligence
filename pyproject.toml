@@ -70,6 +70,11 @@ geoai = [
   "torchgeo>=0.8,<0.10",
   "torchvision",
   "timm",
+  # Transformers is what runs a checkpoint found by the model search: the
+  # sandbox loads its classes and processor, so a Hub segmentation or detection
+  # repo the user picked is actually runnable. Without it the wizard reports the
+  # checkpoint as unusable and says to install this extra.
+  "transformers>=4.44",
   "huggingface_hub",
 ]
 

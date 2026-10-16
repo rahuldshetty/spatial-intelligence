@@ -22,7 +22,7 @@ NODE = shutil.which("node")
 if not MARKED.is_file():
     MARKED = None
 
-COMPONENTS = ("markdown", "plan", "progress", "trace", "interaction", "cell")
+COMPONENTS = ("markdown", "plan", "progress", "trace", "interaction", "cell", "fields")
 
 SHIM = r'''
 /* Minimal DOM for the component tests: no layout, no CSS engine. */
@@ -598,6 +598,28 @@ export async function respondInteraction() {
 
 export async function cancelInteraction() {
   return { status: "stopped" };
+}
+
+export async function geocodePlace(place) {
+  return { label: String(place), bbox: [0, 0, 1, 1], center: [0.5, 0.5] };
+}
+
+export async function searchModels(query) {
+  return { results: [] };
+}
+
+export async function modelProfile(ref) {
+  return {
+    ref: String(ref),
+    route: "onnx",
+    tasks: ["segmentation"],
+    labels: [],
+    promptable: true,
+    runnable: true,
+    supported: true,
+    source: "catalog",
+    reason: "stub",
+  };
 }
 '''
 
@@ -1292,6 +1314,7 @@ class ScenarioCase(unittest.TestCase):
             shutil.copy2(JS / "components" / f"{name}.js", components / f"{name}.js")
         shutil.copy2(JS / "pages" / "cells.js", pages / "cells.js")
         shutil.copy2(JS / "scroll.js", cls.root / "js" / "scroll.js")
+        shutil.copy2(JS / "bridge.js", cls.root / "js" / "bridge.js")
         shutil.copy2(MARKED, vendor / "marked.min.js")
         (cls.root / "js" / "dom.js").write_text(DOM_STUB, encoding="utf-8")
         (cls.root / "js" / "store.js").write_text(STORE_STUB, encoding="utf-8")

@@ -379,6 +379,7 @@ class CatalogPackTests(CatalogTestCase):
             [
                 "add_catalog_scene",
                 "download_catalog_scene",
+                "geocode",
                 "list_stac_catalogs",
                 "search_openaerialmap",
                 "search_stac_collections",

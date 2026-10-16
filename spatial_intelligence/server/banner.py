@@ -136,6 +136,25 @@ def tool_table(registry: ToolRegistry) -> list[str]:
     return lines
 
 
+def _workspace_line(root: Path, names: list[str]) -> str:
+    """The data-root row: the workspace list, shortened to fit :data:`WIDTH`.
+
+    Workspace names are the user's, and they accumulate: the row has to survive
+    a machine with a dozen of them without running off a narrow terminal.
+    """
+    prefix = f"{'data root':<{LABEL_WIDTH}}"
+    if not names:
+        return prefix + f"{root} [none yet]"
+    for count in range(len(names), 0, -1):
+        label = ", ".join(names[:count])
+        if count < len(names):
+            label += f", … +{len(names) - count} more"
+        candidate = f"{root} [{len(names)}: {label}]"
+        if len(prefix) + len(candidate) <= WIDTH:
+            return prefix + candidate
+    return prefix + f"{root} [{len(names)} workspaces]"
+
+
 def environment_table() -> list[str]:
     """Return what this build is: version, interpreter, model, data root, libraries.
 
@@ -154,11 +173,7 @@ def environment_table() -> list[str]:
             f"(python {platform.python_version()}, {sys.platform})",
         ),
         _row("model", f"{model} ({key_state})"),
-        _row(
-            "data root",
-            f"{app_root() / 'workspaces'} "
-            f"[{len(workspaces)}: {', '.join(workspaces) if workspaces else 'none yet'}]",
-        ),
+        _workspace_line(app_root() / "workspaces", workspaces),
         _row(
             "libraries",
             f"geolibre {_version('geolibre')} | rasterio {_version('rasterio')} "

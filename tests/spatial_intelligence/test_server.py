@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from starlette.testclient import TestClient
 
@@ -306,6 +307,22 @@ class StartupReportTests(unittest.TestCase):
         widest = max(len(line) for line in text.splitlines())
 
         self.assertLessEqual(widest, banner.WIDTH)
+
+    def test_a_long_workspace_list_still_fits_the_width(self):
+        # Names are the user's and they accumulate, so the row has to shorten
+        # itself instead of running off the terminal.
+        with mock.patch.object(
+            banner,
+            "list_workspaces",
+            return_value=[f"a-fairly-long-workspace-name-{index}" for index in range(12)],
+        ):
+            text = banner.startup_report(self.registry)
+
+        widest = max(len(line) for line in text.splitlines())
+
+        self.assertLessEqual(widest, banner.WIDTH)
+        self.assertIn("… +", text)  # the shortened list says how many it hid
+        self.assertIn("[12:", text)  # and how many there are
 
     def test_a_stream_that_cannot_take_the_glyphs_degrades_instead_of_failing(self):
         class Narrow:

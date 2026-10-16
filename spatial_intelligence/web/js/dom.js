@@ -49,9 +49,13 @@ function dismissMenus() {
   document.querySelectorAll(".menu.open").forEach((menu) => menu.classList.remove("open"));
 }
 
-export function openDialog(buildContent) {
+export function openDialog(buildContent, options) {
   dismissMenus();
-  const overlay = el("div", { id: "overlay", class: "open" });
+  const passthrough = Boolean(options && options.passthrough);
+  const overlay = el("div", {
+    id: "overlay",
+    class: "open" + (passthrough ? " passthrough" : ""),
+  });
   const dialog = el("div", { id: "dialog" });
   overlay.append(dialog);
   document.body.append(overlay);

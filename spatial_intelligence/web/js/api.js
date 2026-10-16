@@ -35,8 +35,26 @@ export function updateSettings(patch) {
   return request("PUT", "/api/settings", patch);
 }
 
-export function createWorkspace(name) {
-  return request("POST", "/api/workspace/new", { name });
+export function listWorkflows() {
+  return request("GET", "/api/workflows");
+}
+
+export function searchModels(q, task, limit = 20) {
+  const params = new URLSearchParams({ q, task: task || "" });
+  if (limit != null) params.set("limit", String(limit));
+  return request("GET", "/api/models/search?" + params.toString());
+}
+
+export function modelProfile(model, task) {
+  return request("POST", "/api/models/profile", { model, task: task || "" });
+}
+
+export function geocodePlace(q) {
+  return request("GET", "/api/geocode?q=" + encodeURIComponent(q));
+}
+
+export function createWorkspace(name, workflow = "", params = {}) {
+  return request("POST", "/api/workspace/new", { name, workflow, params });
 }
 
 export function openWorkspace(name) {

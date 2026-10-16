@@ -173,9 +173,15 @@ class NotebookSession:
 
     # -- cell mutations --------------------------------------------------
 
-    def add(self, kind: str, source: str = "", index: int | None = None) -> dict:
+    def add(
+        self,
+        kind: str,
+        source: str = "",
+        index: int | None = None,
+        metadata: dict | None = None,
+    ) -> dict:
         """Create a cell and place it in the notebook."""
-        cell = notebook.new_cell(kind, source)
+        cell = notebook.new_cell(kind, source, metadata=metadata)
         if index is None or index < 0:
             self._cells.append(cell)
         else:

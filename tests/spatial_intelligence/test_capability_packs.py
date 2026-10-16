@@ -261,6 +261,7 @@ class InteractionPackTests(PackTestCase):
                     ],
                     "default": None,
                     "placeholder": None,
+                    "task": None,
                 }
             ],
         )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...contracts.errors import ToolInputError
 from ..deps import app_state
@@ -16,6 +16,14 @@ VALID_KINDS = frozenset({"markdown", "python", "prompt"})
 
 class WorkspaceName(BaseModel):
     name: str
+
+
+class NewWorkspace(BaseModel):
+    """A workspace to create, optionally seeded from a workflow's answers."""
+
+    name: str
+    workflow: str = ""
+    params: dict = Field(default_factory=dict)
 
 
 class AddCell(BaseModel):
@@ -38,9 +46,11 @@ class InteractionResponse(BaseModel):
 
 
 @router.post("/api/workspace/new")
-def api_workspace_new(body: WorkspaceName) -> dict:
-    """Create a workspace and open it."""
-    return app_state().new_workspace(body.name.strip())
+def api_workspace_new(body: NewWorkspace) -> dict:
+    """Create a workspace and open it, seeding a workflow when one is named."""
+    return app_state().new_workspace(
+        body.name.strip(), body.workflow.strip(), body.params
+    )
 
 
 @router.post("/api/workspace/open")

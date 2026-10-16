@@ -2,39 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field, model_validator
 from pydantic_ai import CallDeferred
 
+from ...contracts.forms import ChoiceOption, InteractionField
 from ..runtime import ToolRuntime
 from ..spec import ToolKind, pack, tool
 
-
-class ChoiceOption(BaseModel):
-    value: str
-    label: str
-    description: str | None = None
-    recommended: bool = False
-    thumbnail_url: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class InteractionField(BaseModel):
-    id: str
-    label: str
-    type: Literal["radio", "multi_select", "text", "confirmation"]
-    description: str | None = None
-    required: bool = True
-    options: list[ChoiceOption] = Field(default_factory=list)
-    default: Any = None
-    placeholder: str | None = None
-
-    @model_validator(mode="after")
-    def validate_options(self):
-        if self.type in {"radio", "multi_select"} and not self.options:
-            raise ValueError(f"{self.type} field {self.id!r} requires options")
-        return self
+# ``ChoiceOption``/``InteractionField`` live in ``contracts.forms`` so a
+# workflow's wizard can ask for its parameters with the same schema this tool
+# sends. They stay exported here for callers that already import them.
 
 
 @pack(category="interaction")

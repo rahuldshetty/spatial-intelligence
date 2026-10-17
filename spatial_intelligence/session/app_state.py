@@ -89,6 +89,7 @@ class AppState:
                 "map_app_url": self.workspaces.map._app_url,
                 "files": self.list_files(),
                 "jobs": self.jobs.snapshot(),
+                "running_cell": self.runs.active_id(),
                 "settings": dict(self.settings),
                 "vision": self.vision.snapshot(),
             }
@@ -510,6 +511,8 @@ class AppState:
             source = cell["source"]
             # Every execution attempt counts, including a resumed one.
             cell["execution_count"] = (cell.get("execution_count") or 0) + 1
+        if kind == "prompt":
+            self.bus.publish("running", {"cell_id": cell_id})
         try:
             with self.services.run_scope(cell_id) as runtime:
                 if kind == "python":
@@ -517,6 +520,8 @@ class AppState:
                 else:
                     self._execute_prompt(cell_id, source, token, resume, runtime)
         finally:
+            if kind == "prompt":
+                self.bus.publish("running", {"cell_id": None})
             with self.lock:
                 cell = self.notebook.find_or_none(cell_id)
                 if cell is not None:

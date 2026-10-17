@@ -1,6 +1,6 @@
 /* One cell: header actions, source, output, trace, and its job strip. */
 
-import { el, expandableContent, toast, usageLabel, usageTitle } from "../dom.js";
+import { confirmDialog, el, expandableContent, toast, usageLabel, usageTitle } from "../dom.js";
 import { moveCell, runCell, stopCell, updateCell } from "../api.js";
 import { icon } from "../icons.js";
 import { state } from "../store.js";
@@ -8,6 +8,7 @@ import { cellOutputText, renderMarkdown } from "./markdown.js";
 import { renderTrace } from "./trace.js";
 import { jump } from "../scroll.js";
 import { editMarkdown, isCellDeleted, removeCell } from "../pages/cells.js";
+import { openTraceModal } from "./trace-modal.js";
 
 /** Fire a cell action, surfacing its failure the way the old app did. */
 function act(action) {
@@ -31,6 +32,17 @@ function cellStatusText(status) {
   if (status === "error") return "failed";
   if (status === "done") return "done";
   return "";
+}
+
+function confirmDeleteCell(cell) {
+  confirmDialog({
+    title: "Delete this cell?",
+    message:
+      "The cell and its recorded steps will be removed. This cannot be undone.",
+    confirmLabel: "Delete",
+    danger: true,
+    onConfirm: () => removeCell(cell.id),
+  });
 }
 
 function headButton(name, title, onclick, className = "icon") {
@@ -94,16 +106,16 @@ function renderHeader(cell, kind, geoai, generated) {
     if (!generated) {
       actions.append(
         headButton("pencil", "Edit", () => editMarkdown(cell)),
-        headButton("trash-2", "Delete", () => act(() => removeCell(cell.id)))
+        headButton("trash-2", "Delete", () => confirmDeleteCell(cell))
       );
     }
   } else if (kind === "tool") {
-    actions.append(headButton("trash-2", "Delete", () => act(() => removeCell(cell.id))));
+    actions.append(headButton("trash-2", "Delete", () => confirmDeleteCell(cell)));
   } else {
     actions.append(
       headButton("chevron-up", "Move up", () => act(() => moveCell(cell.id, -1))),
       headButton("chevron-down", "Move down", () => act(() => moveCell(cell.id, 1))),
-      headButton("trash-2", "Delete", () => act(() => removeCell(cell.id)))
+      headButton("trash-2", "Delete", () => confirmDeleteCell(cell))
     );
   }
   header.append(actions);
@@ -221,6 +233,9 @@ function renderToolOutput(cell) {
  * the cell's job strip whatever the cell kind, so a job parented to a python or
  * tool cell is visible instead of being dropped.
  */
+const expandedPromptTraces = new Set();
+const TERMINAL_STATUSES = new Set(["done", "stopped", "error"]);
+
 export function renderCell(cell, jobs = []) {
   const kind = cell.kind;
   const geoai = (cell.metadata && cell.metadata.geoai) || {};
@@ -241,6 +256,12 @@ export function renderCell(cell, jobs = []) {
     if (output) box.append(output);
   }
 
+  // The prompt's final answer comes before the folded intermediate steps.
+  if (kind !== "markdown" && kind !== "tool") {
+    const output = renderOutputBlock(cell);
+    if (output) box.append(output);
+  }
+
   const traceNodes = renderTrace(cell, jobs);
   // A prompt cell always mounts its trace container, even while it is empty:
   // live steps stream in before the first one is part of the cell snapshot, and
@@ -249,11 +270,45 @@ export function renderCell(cell, jobs = []) {
   if (kind === "prompt" || traceNodes.length) {
     const trace = el("div", { class: "trace" });
     trace.append(...traceNodes);
-    box.append(trace);
-  }
-
-  if (kind !== "markdown" && kind !== "tool") {
-    box.append(renderOutputBlock(cell));
+    if (
+      kind === "prompt" &&
+      traceNodes.length &&
+      TERMINAL_STATUSES.has(cell.status)
+    ) {
+      const details = el("details", {
+        class: "trace-details",
+        "data-trace-cell": cell.id,
+      });
+      if (expandedPromptTraces.has(cell.id)) details.setAttribute("open", "");
+      const summary = el("summary", { class: "trace-toggle" });
+      summary.append(
+        icon("chevron-right", { size: 13, class: "trace-toggle-icon" }),
+        el("span", {
+          text: "Intermediate steps (" + traceNodes.length + ")",
+        })
+      );
+      const view = el("button", {
+        type: "button",
+        class: "trace-view",
+        title: "Open full trace",
+        "aria-label": "Open full trace",
+      });
+      view.append(icon("eye", { size: 13 }), el("span", { text: "View" }));
+      view.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openTraceModal(cell);
+      });
+      summary.append(view);
+      details.append(summary, trace);
+      details.addEventListener("toggle", () => {
+        if (details.open) expandedPromptTraces.add(cell.id);
+        else expandedPromptTraces.delete(cell.id);
+      });
+      box.append(details);
+    } else {
+      box.append(trace);
+    }
   }
 
   return box;

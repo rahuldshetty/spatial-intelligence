@@ -70,6 +70,7 @@ class StateRouteTests(ServerTestCase):
                 "jobs",
                 "map_app_url",
                 "map_project",
+                "running_cell",
                 "settings",
                 "vision",
                 "workspaces",
@@ -78,6 +79,7 @@ class StateRouteTests(ServerTestCase):
         self.assertIsNone(snapshot["active_workspace"])
         self.assertEqual(snapshot["cells"], [])
         self.assertEqual(snapshot["jobs"], [])
+        self.assertIsNone(snapshot["running_cell"])
         self.assertIn("model", snapshot["settings"])
         self.assertEqual(snapshot["vision"]["available"], False)
 

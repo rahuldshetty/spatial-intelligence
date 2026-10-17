@@ -435,6 +435,28 @@ body.resizing #map-panel iframe {
   color: var(--text);
 }
 
+.status-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  flex: 0 0 24px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.status-stop:hover {
+  color: var(--error);
+  background: var(--error-soft);
+  border-color: var(--border);
+}
+
 .status-right {
   margin-left: auto;
   display: flex;

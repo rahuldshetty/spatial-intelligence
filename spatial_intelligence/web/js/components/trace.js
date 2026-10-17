@@ -19,6 +19,11 @@ already hold one like it.
 const pendingTrace = new Map();
 let awaitingSnapshot = true;
 
+/* Long reasoning is folded by default; the reader can open it once. */
+const expandedText = new Set();
+const TEXT_LINE_LIMIT = 12;
+const TEXT_CHAR_LIMIT = 1200;
+
 function isCodeTool(name) {
   return name === "run_python";
 }
@@ -101,10 +106,33 @@ function toolStepNode(group) {
   return details;
 }
 
-function traceTextNode(content) {
+function traceTextNode(content, cellId, index) {
   const node = el("div", { class: "trace-step trace-text markdown" });
   node.dataset.source = content || "";
-  node.innerHTML = renderMarkdown(node.dataset.source);
+  const body = el("div", { class: "trace-text-body" });
+  body.innerHTML = renderMarkdown(node.dataset.source);
+  node.append(body);
+
+  const source = node.dataset.source;
+  const lines = source.split("\n").length;
+  if (lines <= TEXT_LINE_LIMIT && source.length <= TEXT_CHAR_LIMIT) return node;
+
+  const key = String(cellId || "") + ":" + String(index);
+  const open = expandedText.has(key);
+  node.classList.toggle("collapsed", !open);
+  const more = el("button", {
+    type: "button",
+    class: "trace-more",
+    text: open ? "Show less" : "View more",
+    "aria-expanded": String(open),
+  });
+  more.addEventListener("click", () => {
+    const collapsed = node.classList.toggle("collapsed");
+    expandedText[collapsed ? "delete" : "add"](key);
+    more.textContent = collapsed ? "View more" : "Show less";
+    more.setAttribute("aria-expanded", String(!collapsed));
+  });
+  node.append(more);
   return node;
 }
 
@@ -191,7 +219,10 @@ function traceEntries(trace, cell) {
   );
   for (const group of groups) {
     if (group.type === "text") {
-      entries.push({ index: group.index, nodes: [traceTextNode(group.content)] });
+      entries.push({
+        index: group.index,
+        nodes: [traceTextNode(group.content, cell && cell.id, group.index)],
+      });
     } else if (group.type === "tool") {
       const toolNode = toolStepNode(group);
       const nodes = [toolNode];

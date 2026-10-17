@@ -43,6 +43,7 @@ export function boot() {
     onFiles: handleFiles,
     onSettings: handleSettings,
     onVision: handleVision,
+    onRunning: handleRunning,
     onMapCapture: handleMapCapture,
     onMapBridge: handleMapBridge,
     onStatus: setConnection,
@@ -132,6 +133,11 @@ function handleTrace(data) {
 function handleVision(data) {
   if (!data) return;
   state.vision = data;
+  refreshStatusBar();
+}
+
+function handleRunning(data) {
+  state.running_cell = (data && data.cell_id) || null;
   refreshStatusBar();
 }
 

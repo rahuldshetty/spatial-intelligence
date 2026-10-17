@@ -22,7 +22,16 @@ NODE = shutil.which("node")
 if not MARKED.is_file():
     MARKED = None
 
-COMPONENTS = ("markdown", "plan", "progress", "trace", "interaction", "cell", "fields")
+COMPONENTS = (
+    "markdown",
+    "plan",
+    "progress",
+    "trace",
+    "trace-modal",
+    "interaction",
+    "cell",
+    "fields",
+)
 
 SHIM = r'''
 /* Minimal DOM for the component tests: no layout, no CSS engine. */
@@ -454,6 +463,8 @@ export function expandableContent(label, content, extraClass = "") {
 export function toast() {}
 
 export function openDialog() {}
+
+export function confirmDialog() {}
 
 export function closeDialog() {}
 

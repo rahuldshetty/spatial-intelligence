@@ -119,6 +119,11 @@ class RunQueue:
         with self._lock:
             return bool(self._tokens or self._queued)
 
+    def active_id(self) -> str | None:
+        """Return the cell currently executing, or ``None`` between runs."""
+        with self._lock:
+            return next(iter(self._tokens), None)
+
     def wait_idle(self, timeout: float | None = None) -> bool:
         """Block until no cell is running or queued.
 

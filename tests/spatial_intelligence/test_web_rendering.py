@@ -572,6 +572,29 @@ class StatusBarRenderingTests(WebRenderingTestCase):
         self.assertIn("live updates", rendered["connTitle"].lower())
         self.assertEqual(rendered["toggles"], 1)
 
+    def test_status_bar_shows_stop_only_while_a_prompt_runs(self):
+        running = self.run_module(
+            module_url("components", "status-bar.js"),
+            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
+            "state.running_cell = 'c1';"
+            "const bar = mod.renderStatusBar();"
+            "const button = bar.querySelector('.status-stop');"
+            "return { count: bar.querySelectorAll('.status-stop').length,"
+            "  title: button && button.getAttribute('title'),"
+            "  icon: button ? button.querySelectorAll('.icon').length : 0 };",
+        )
+        idle = self.run_module(
+            module_url("components", "status-bar.js"),
+            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
+            "state.running_cell = null;"
+            "return { count: mod.renderStatusBar().querySelectorAll('.status-stop').length };",
+        )
+
+        self.assertEqual(running["count"], 1)
+        self.assertEqual(running["title"], "Stop running prompt")
+        self.assertEqual(running["icon"], 1)
+        self.assertEqual(idle["count"], 0)
+
     def test_status_bar_shows_image_input_only_when_available(self):
         base = (
             "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
@@ -638,6 +661,113 @@ class StatusBarRenderingTests(WebRenderingTestCase):
         self.assertEqual(rendered["text"], "")
         self.assertEqual(rendered["cls"], "conn conn-reconnecting")
         self.assertIn("reconnecting", rendered["title"].lower())
+
+
+class PromptTraceRenderingTests(WebRenderingTestCase):
+    def test_a_finished_prompt_folds_steps_after_the_final_answer(self):
+        rendered = self.run_module(
+            module_url("components", "cell.js"),
+            """
+            const node = mod.renderCell({
+              id: "p1", kind: "prompt", source: "go", status: "done",
+              execution_count: 1,
+              outputs: [{ output_type: "stream", text: "final answer" }],
+              trace: [
+                { type: "text", content: "long ".repeat(400) },
+                { type: "text", content: "final" },
+              ],
+            }, []);
+            const details = node.querySelector("details.trace-details");
+            const texts = [...node.querySelectorAll(".trace-text")];
+            return {
+              classes: [...node.children].map((child) => child.className || ""),
+              hasDetails: Boolean(details),
+              open: details ? details.getAttribute("open") : null,
+              summary: details ? details.querySelector("summary").textContent : null,
+              texts: texts.map((item) => ({
+                cls: item.className,
+                source: item.dataset.source,
+                more: Boolean(item.querySelector(".trace-more")),
+              })),
+              finalText: node.querySelector(".cell-out-block .markdown")?.innerHTML || "",
+            };
+            """,
+            marked=True,
+        )
+
+        classes = rendered["classes"]
+        self.assertTrue(rendered["hasDetails"])
+        self.assertIsNone(rendered["open"])
+        self.assertIn("Intermediate steps (1)", rendered["summary"])
+        self.assertLess(
+            classes.index("cell-out-block"), classes.index("trace-details")
+        )
+        self.assertIn("final answer", rendered["finalText"])
+        self.assertIn("collapsed", rendered["texts"][0]["cls"])
+        self.assertTrue(rendered["texts"][0]["more"])
+        self.assertFalse(rendered["texts"][0]["source"].startswith("final"))
+
+    def test_a_running_prompt_keeps_the_trace_visible(self):
+        rendered = self.run_module(
+            module_url("components", "cell.js"),
+            """
+            const node = mod.renderCell({
+              id: "p2", kind: "prompt", source: "go", status: "running",
+              trace: [{ type: "text", content: "working" }],
+            }, []);
+            return {
+              details: Boolean(node.querySelector("details.trace-details")),
+              trace: Boolean(node.querySelector(".trace")),
+            };
+            """,
+            marked=True,
+        )
+        self.assertFalse(rendered["details"])
+        self.assertTrue(rendered["trace"])
+
+
+class TraceModalTests(WebRenderingTestCase):
+    def test_the_modal_shows_totals_requests_and_all_steps(self):
+        usage = {
+            "requests": 1,
+            "input_tokens": 1200,
+            "output_tokens": 30,
+            "total_tokens": 1230,
+            "cache_read_tokens": 600,
+            "cost": 0.0012,
+            "tool_calls": 1,
+        }
+        rendered = self.run_module(
+            module_url("components", "trace-modal.js"),
+            "mod.openTraceModal({"
+            "  id: 'p1', kind: 'prompt', status: 'done',"
+            "  usage: " + json.dumps(usage) + ","
+            "  trace: ["
+            "    { type: 'text', content: 'thinking' },"
+            "    { type: 'tool_call', name: 'list_files', args: {}, tool_call_id: 't1' },"
+            "    { type: 'tool_result', name: 'list_files', content: ['a.tif'], outcome: 'success', tool_call_id: 't1' },"
+            "    { type: 'usage', usage: " + json.dumps(usage) + ","
+            "      requests: [Object.assign({}, " + json.dumps(usage) + ", {model: 'openai:test', tools: ['list_files']})] },"
+            "  ],"
+            "});"
+            "const dialog = document.getElementById('dialog');"
+            "const trace = dialog.querySelector('.trace-modal-trace');"
+            "return {"
+            "  cls: dialog.className,"
+            "  stats: dialog.querySelectorAll('.trace-stat').length,"
+            "  text: dialog.textContent,"
+            "  steps: trace ? trace.querySelectorAll('.trace-step').length : 0,"
+            "};",
+            marked=True,
+        )
+
+        self.assertIn("trace-dialog", rendered["cls"])
+        self.assertEqual(rendered["stats"], 7)
+        self.assertIn("Run totals", rendered["text"])
+        self.assertIn("Token usage by model request", rendered["text"])
+        self.assertIn("openai:test", rendered["text"])
+        self.assertIn("list_files", rendered["text"])
+        self.assertGreaterEqual(rendered["steps"], 2)
 
 
 class DataTabRenderingTests(WebRenderingTestCase):

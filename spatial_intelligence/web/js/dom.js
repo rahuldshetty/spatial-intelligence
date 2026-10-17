@@ -139,6 +139,52 @@ export function closeDialog() {
   }
 }
 
+/** Ask before a destructive or interrupting action. ``onConfirm`` may be async. */
+export function confirmDialog({
+  title,
+  message,
+  confirmLabel = "Confirm",
+  danger = false,
+  onConfirm,
+}) {
+  openDialog((dialog) => {
+    const heading = el("div", { class: "dialog-heading" });
+    heading.append(
+      el("h3", { text: title }),
+      el("p", { class: "dialog-subtitle", text: message })
+    );
+    const status = el("p", { class: "dialog-status" });
+    const cancel = el("button", {
+      type: "button",
+      text: "Cancel",
+      onclick: closeDialog,
+    });
+    const confirm = el("button", {
+      type: "button",
+      class: danger ? "danger" : "primary",
+      text: confirmLabel,
+    });
+    const actions = el("div", { class: "dialog-actions" });
+    actions.append(cancel, confirm);
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      cancel.disabled = true;
+      status.className = "dialog-status";
+      status.textContent = "Working…";
+      try {
+        await onConfirm();
+        closeDialog();
+      } catch (error) {
+        status.className = "dialog-status error";
+        status.textContent = error.message || String(error);
+        confirm.disabled = false;
+        cancel.disabled = false;
+      }
+    });
+    dialog.append(heading, status, actions);
+  });
+}
+
 export function dialogActions(dialog, primary, onConfirm) {
   const actions = el("div", { class: "dialog-actions" });
   actions.append(el("button", { text: "Cancel", onclick: closeDialog }));

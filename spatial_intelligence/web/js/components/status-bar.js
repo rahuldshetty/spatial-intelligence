@@ -6,7 +6,8 @@ live in the token summary's tooltip, keeping the bar to one line in a narrow
 panel.
 */
 
-import { el, formatCost, formatTokens } from "../dom.js";
+import { stopCell } from "../api.js";
+import { confirmDialog, el, formatCost, formatTokens } from "../dom.js";
 import { icon } from "../icons.js";
 import { followToggle } from "../scroll.js";
 import { state, usageTotals } from "../store.js";
@@ -51,6 +52,29 @@ function visionNode() {
   return node;
 }
 
+function stopNode() {
+  const cellId = state.running_cell;
+  if (!cellId) return null;
+  const button = el("button", {
+    type: "button",
+    class: "status-stop",
+    title: "Stop running prompt",
+    "aria-label": "Stop running prompt",
+  });
+  button.append(icon("pause", { size: 13 }));
+  button.addEventListener("click", () => {
+    confirmDialog({
+      title: "Stop this prompt?",
+      message:
+        "The current model run will be cancelled. Completed tool calls and files stay in the workspace.",
+      confirmLabel: "Stop",
+      danger: true,
+      onConfirm: () => stopCell(cellId),
+    });
+  });
+  return button;
+}
+
 function usageDetails(u) {
   const rounded = u.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
   const parts = [
@@ -93,6 +117,8 @@ export function renderStatusBar() {
   }
 
   const right = el("div", { class: "status-right" });
+  const stop = stopNode();
+  if (stop) right.append(stop);
   right.append(followToggle());
   bar.append(right);
   return bar;

@@ -16,6 +16,7 @@ const PATHS = {
     '<path d="M12 3c-2.7 3.2-2.7 14.8 0 18"/>' +
     '<circle cx="17.6" cy="6.6" r="2.1" fill="currentColor" stroke="none"/>',
   play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>',
+  pause: '<path d="M9 5v14M15 5v14"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none"/>',
   "chevron-up": '<path d="m6 15 6-6 6 6"/>',
   "chevron-down": '<path d="m6 9 6 6 6-6"/>',

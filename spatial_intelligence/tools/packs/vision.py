@@ -51,6 +51,9 @@ class VisionPack:
         visual boxes. For strict JSON/box output from a reasoning model, prefer
         run_python ``vision.ask(...)``: it calls the vision endpoint directly
         with thinking off by default, so the answer is not lost to reasoning.
+        Vision models return percentage/normalized boxes more reliably than
+        absolute pixels; for tiled detection, georeference with the tile's
+        ``ul_e``/``ul_n`` and resolution, not scene ``px_x``/``px_y`` offsets.
         For precise measurements or geometry, use the raster and vector tools
         instead; the image is only the visible viewport, not the whole dataset.
         """

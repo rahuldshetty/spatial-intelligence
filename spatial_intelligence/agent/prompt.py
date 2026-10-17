@@ -85,7 +85,16 @@ Rules:
     vision.ask(question, image="map"|"path"). For box/JSON answers from a
     reasoning model, use vision.ask (thinking is off by default); a reasoning
     model can otherwise spend its whole output budget on reasoning and return
-    no answer.
+    no answer. For dense tiled detection, ask for normalized 0–1 boxes (pixel
+    coordinates may refer to a resized image), cap boxes per tile (about 25–40)
+    so JSON is not truncated, and use the tile's own `ul_e`/`ul_n` plus
+    resolution to georeference. `px_x`/`px_y` are scene pixel offsets, not a
+    geotransform; never add them to tile-local normalized coordinates. Assign
+    each detection to one tile by its core, dedupe overlaps, and QA the overlay
+    before reporting counts. When a NIR band is available, reject boxes whose
+    interior is mostly vegetation (high NDVI) and implausibly large boxes that
+    span parking or roads; the boxes are axis-aligned detections, not building
+    footprints.
 11. Use web_search for documentation, provider terms, or current facts no dataset
     tool covers; treat results as leads and download a promising URL to verify.
 12. Report concisely what you did and where outputs live (relative paths).

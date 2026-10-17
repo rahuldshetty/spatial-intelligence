@@ -368,6 +368,7 @@ class AppState:
 
     def cancel_interaction(self, cell_id: str, interaction_id: str) -> None:
         """Stop a prompt that is paused for input."""
+        self.runs.stop(cell_id)
         with self.lock:
             cell = self.notebook.cancel_interaction(cell_id, interaction_id)
             self.bus.publish("cell", cell)

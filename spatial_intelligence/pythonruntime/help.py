@@ -68,7 +68,7 @@ def roots() -> dict:
 #: The workspace facade ``run_python`` binds, described as its own "symbol".
 VISION_DOC = (
     "Image-input helper available in run_python.\n"
-    "  vision.supported -> bool\n"
+    "  vision.supported -> bool   (a property: use it without parentheses)\n"
     "  vision.ask(question, image='map', max_side=1400) -> str\n"
     "      image is 'map' (the current GeoLibre viewport) or a workspace path\n"
     "      to a PNG/JPEG/GeoTIFF. Returns the model's answer; use JSON in the\n"

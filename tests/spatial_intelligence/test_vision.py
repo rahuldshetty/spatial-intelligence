@@ -21,6 +21,7 @@ from spatial_intelligence.session.capture import CaptureBroker, MapCapture
 from spatial_intelligence.session.jobs import JobRegistry
 from spatial_intelligence.session.services import SessionServices
 from spatial_intelligence.tools.build import default_registry
+from spatial_intelligence.tools.packs.python_ import PythonPack
 from spatial_intelligence.tools.packs.vision import VisionPack
 from spatial_intelligence.tools.runtime import ToolRuntime
 from spatial_intelligence.workspace import Workspace
@@ -159,6 +160,11 @@ class CaptureBrokerTests(unittest.TestCase):
 class FakeVision:
     def __init__(self, supported: bool = True) -> None:
         self.supported = supported
+        self.calls = []
+
+    def ask(self, question, data, media_type="image/jpeg"):
+        self.calls.append((question, data, media_type))
+        return "a red square"
 
 
 class FakeBroker:
@@ -209,6 +215,29 @@ class VisionGatingTests(unittest.TestCase):
                 self.assertIn("analyze_image", services.registry)
             finally:
                 services.unbind()
+
+
+class PythonVisionTests(unittest.TestCase):
+    def test_the_python_facade_gets_the_session_vision_service(self):
+        with tempfile.TemporaryDirectory() as root:
+            workspace = Workspace(root).create()
+            (workspace.data / "shot.png").write_bytes(png_bytes(8, 8))
+            vision = FakeVision(True)
+            runtime = ToolRuntime(
+                workspace=workspace,
+                services={VISION_SERVICE: vision},
+            )
+            pack = PythonPack(runtime)
+            namespace = pack.executor.namespace()
+            facade = namespace["vision"]
+
+            self.assertTrue(facade.supported)
+            self.assertEqual(
+                facade.ask("what is it?", image="data/shot.png"),
+                "a red square",
+            )
+            self.assertEqual(vision.calls[0][0], "what is it?")
+            self.assertTrue(vision.calls[0][1])
 
 
 class VisionToolTests(unittest.TestCase):

@@ -8,6 +8,7 @@ that exchange, so the runner, the session, and the notebook recorder agree.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic_ai import DeferredToolRequests
@@ -75,18 +76,66 @@ def validate_answers(interaction: dict, answers: dict) -> None:
             )
 
 
+_AOI_MODES = {
+    "view": "Map view",
+    "drawn": "Drawn shape",
+    "bbox": "Bounding box",
+    "place": "Place",
+}
+
+
+def _aoi_text(value: object) -> str:
+    """Render the composite AOI answer without dumping a whole geometry."""
+    if not isinstance(value, dict):
+        return str(value)
+    mode = str(value.get("mode") or "")
+    parts = [_AOI_MODES.get(mode, mode or "Area of interest")]
+    label = value.get("label")
+    if label:
+        parts.append(str(label))
+    bbox = value.get("bbox")
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        try:
+            parts.append("bbox [" + ", ".join(f"{float(item):g}" for item in bbox) + "]")
+        except (TypeError, ValueError):
+            parts.append("bbox " + str(list(bbox)))
+    elif isinstance(value.get("geojson"), dict):
+        features = (value["geojson"] or {}).get("features")
+        if isinstance(features, list):
+            parts.append(f"{len(features)} feature(s)")
+    return " — ".join(parts)
+
+
+def _answer_item(field: dict, item: object, labels: dict) -> str:
+    if isinstance(item, (str, int, float, bool)):
+        return str(labels.get(item, item))
+    return json.dumps(item, ensure_ascii=False, default=str)
+
+
+def _answer_text(field: dict, value: object) -> str:
+    if value is None:
+        return "none"
+    if field.get("type") == "aoi":
+        return _aoi_text(value)
+    labels = (
+        {
+            option.get("value"): option.get("label", option.get("value"))
+            for option in field.get("options", [])
+        }
+        if field.get("type") in {"radio", "multi_select"}
+        else {}
+    )
+    values = value if isinstance(value, list) else [value]
+    return ", ".join(_answer_item(field, item, labels) for item in values)
+
+
 def answers_markdown(interaction: dict, answers: dict) -> str:
     """Render submitted answers as the Markdown cell recorded in the notebook."""
     fields = {field.get("id"): field for field in interaction.get("fields", [])}
     lines = ["### Input provided"]
     for key, value in answers.items():
         field = fields.get(key) or {}
-        option_labels = {
-            option.get("value"): option.get("label", option.get("value"))
-            for option in field.get("options", [])
-        }
-        values = value if isinstance(value, list) else [value]
-        rendered = ", ".join(str(option_labels.get(item, item)) for item in values)
+        rendered = _answer_text(field, value)
         lines.append(f"- **{field.get('label', key)}:** {rendered}")
     return "\n".join(lines)
 

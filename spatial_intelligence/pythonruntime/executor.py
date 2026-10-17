@@ -123,10 +123,14 @@ class _VisionFacade:
         """Ask one question about ``image`` ("map" or a workspace path)."""
         service = self._services.get(VISION_SERVICE)
         if service is None:
-            raise ToolInputError("image input is not configured for this session")
-        if not self.supported:
             raise ToolInputError(
-                "image input is not available for the configured model"
+                "image input is not configured for this session; reopen the "
+                "workspace after enabling a vision-capable model"
+            )
+        if not service.supported:
+            raise ToolInputError(
+                "image input is not available for the configured model; "
+                "choose a vision-capable OpenAI-compatible model"
             )
         question = (question or "").strip()
         if not question:

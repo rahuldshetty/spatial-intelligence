@@ -23,6 +23,7 @@ import { renderCellsOnly } from "./pages/cells.js";
 import { renderDataOnly } from "./pages/data.js";
 import { mountShell, renderShell } from "./pages/shell.js";
 import { syncMap } from "./pages/map.js";
+import { jump } from "./scroll.js";
 import { applySnapshot, isGeneratedCell, normalizeCells, setFiles, setState, state, subscribe, upsertJob } from "./store.js";
 
 export function boot() {
@@ -72,12 +73,18 @@ function handleShortcut(event) {
   } else if (event.key === "Enter") {
     event.preventDefault();
     if (event.shiftKey) {
-      runAll().catch((error) => toast(error.message || String(error), "error"));
+      runAll()
+        .then(jump)
+        .catch((error) => toast(error.message || String(error), "error"));
       return;
     }
     const cell = document.activeElement && document.activeElement.closest(".cell");
     const cellId = cell && cell.getAttribute("data-cell-id");
-    if (cellId) runCell(cellId).catch((error) => toast(error.message || String(error), "error"));
+    if (cellId) {
+      runCell(cellId)
+        .then(jump)
+        .catch((error) => toast(error.message || String(error), "error"));
+    }
   }
 }
 

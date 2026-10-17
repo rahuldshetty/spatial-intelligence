@@ -6,6 +6,7 @@ import { icon } from "../icons.js";
 import { state } from "../store.js";
 import { cellOutputText, renderMarkdown } from "./markdown.js";
 import { renderTrace } from "./trace.js";
+import { jump } from "../scroll.js";
 import { editMarkdown, isCellDeleted, removeCell } from "../pages/cells.js";
 
 /** Fire a cell action, surfacing its failure the way the old app did. */
@@ -52,7 +53,18 @@ function renderHeader(cell, kind, geoai, generated) {
         headButton("stop", "Stop", () => act(() => stopCell(cell.id)), "run-btn stop")
       );
     } else {
-      header.append(headButton("play", "Run", () => act(() => runCell(cell.id)), "run-btn"));
+      header.append(
+        headButton(
+          "play",
+          "Run",
+          () =>
+            act(async () => {
+              await runCell(cell.id);
+              jump();
+            }),
+          "run-btn"
+        )
+      );
     }
   } else {
     // Keep the header's leading gutter stable across cell kinds and states.

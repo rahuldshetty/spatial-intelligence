@@ -366,8 +366,43 @@ def add_raster(
     )
     if rel is not None and file_url is not None:
         _tag_local_source(map_obj, layer_id, rel)
+    _complete_raster_state(map_obj, layer_id, bands, colormap, rescale_arg)
     persist_map(map_obj, workspace)
     return layer_id
+
+
+def _complete_raster_state(
+    map_obj: Map,
+    layer_id: str,
+    bands: list[int] | None,
+    colormap: str | None,
+    rescale: list[list[float]] | None,
+) -> None:
+    """Fill the raster-control defaults before the app ever sees the layer.
+
+    GeoLibre's bundled layer control expects a complete raster state (including
+    ``gamma``) and its restore path can render before its own normalizer runs.
+    Persisting the defaults here avoids a transient
+    ``e.gamma.toFixed is not a function`` error when the layer lands on the map.
+    """
+    layer = find_layer(map_obj, layer_id)
+    if layer is None:
+        return
+    metadata = layer.setdefault("metadata", {})
+    state = metadata.setdefault("rasterState", {})
+    band_list = list(bands) if bands else [1]
+    state.setdefault("mode", "rgb" if len(band_list) >= 3 else "single")
+    state.setdefault("bands", band_list)
+    state.setdefault("rescale", rescale)
+    state.setdefault("colormap", colormap or "gray")
+    state.setdefault("reversed", False)
+    state.setdefault("nodata", "auto")
+    state.setdefault("gamma", 1)
+    state.setdefault("stretch", "linear")
+    state.setdefault("opacity", 1)
+    state.setdefault("visible", True)
+    state.setdefault("minZoom", 0)
+    state.setdefault("maxZoom", 24)
 
 
 def add_tile_layer(

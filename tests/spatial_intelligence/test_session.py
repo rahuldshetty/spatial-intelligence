@@ -716,6 +716,10 @@ class InteractionTests(SessionTestCase):
         self.assertIsNone(cell["interaction"])
         self.assertIn("Stopped while waiting", cell["outputs"][0]["text"])
 
+        # A stale browser form must not turn a second cancel into an error.
+        state.cancel_interaction(cell_id, "stale-interaction")
+        self.assertEqual(cell["status"], "stopped")
+
 
 class TransientFailureTests(SessionTestCase):
     """A provider hiccup must not lose work, and must not be replayed blindly.

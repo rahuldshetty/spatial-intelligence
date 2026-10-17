@@ -25,6 +25,8 @@ export const state = {
   jobs: [],
   selected_tab: "Cells",
   settings: { ...DEFAULT_SETTINGS },
+  vision: null,
+  running_cell: null,
 };
 
 const listeners = new Set();
@@ -63,6 +65,8 @@ export function applySnapshot(snapshot) {
     files: snap.files || [],
     jobs: snap.jobs || [],
     settings: snap.settings || state.settings,
+    vision: snap.vision != null ? snap.vision : state.vision,
+    running_cell: snap.running_cell != null ? snap.running_cell : null,
   });
 }
 

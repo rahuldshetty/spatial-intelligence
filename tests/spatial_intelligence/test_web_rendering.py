@@ -524,7 +524,7 @@ class FileTreeRenderingTests(WebRenderingTestCase):
 
 
 class StatusBarRenderingTests(WebRenderingTestCase):
-    def test_status_bar_reports_workspace_and_token_totals(self):
+    def test_status_bar_reports_compact_token_totals(self):
         rendered = self.run_module(
             module_url("components", "status-bar.js"),
             "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
@@ -533,32 +533,95 @@ class StatusBarRenderingTests(WebRenderingTestCase):
             "  input_tokens: 2000, output_tokens: 500, requests: 3,"
             "  cache_read_tokens: 1000, cost: 0.01 } }];"
             "const bar = mod.renderStatusBar();"
-            "return { id: bar.attributes.id, text: bar.textContent };",
+            "const stats = bar.querySelector('.status-stats');"
+            "return { id: bar.attributes.id, text: bar.textContent,"
+            "  title: stats && stats.attributes.title,"
+            "  ws: bar.querySelectorAll('.status-ws').length,"
+            "  connText: bar.querySelector('.conn').textContent };",
         )
 
         self.assertEqual(rendered["id"], "status-bar")
-        self.assertIn("demo", rendered["text"])
+        self.assertNotIn("demo", rendered["text"])
         self.assertIn("↑ 2.0k", rendered["text"])
         self.assertIn("↓ 500", rendered["text"])
-        self.assertIn("3 req", rendered["text"])
         self.assertIn("$0.01", rendered["text"])
-        self.assertIn("50% cached", rendered["text"])
+        self.assertIn("3 req", rendered["text"])
+        self.assertIn("50% cache", rendered["text"])
+        self.assertIn("3 requests", rendered["title"])
+        self.assertIn("50% cached", rendered["title"])
+        self.assertEqual(rendered["ws"], 0)
+        self.assertEqual(rendered["connText"], "")
 
-    def test_status_bar_without_usage_shows_no_totals(self):
+    def test_status_bar_without_usage_shows_only_connection_and_follow(self):
         rendered = self.run_module(
             module_url("components", "status-bar.js"),
             "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
             "state.active_workspace = null;"
             "state.cells = [];"
             "const bar = mod.renderStatusBar();"
-            "return { ws: bar.querySelector('.status-ws').textContent,"
+            "return { ws: bar.querySelectorAll('.status-ws').length,"
             "  stats: bar.querySelectorAll('.status-stats').length,"
+            "  connText: bar.querySelector('.conn').textContent,"
+            "  connTitle: bar.querySelector('.conn').attributes.title,"
             "  toggles: bar.querySelectorAll('.follow-toggle').length };",
         )
 
-        self.assertEqual(rendered["ws"], "No workspace")
+        self.assertEqual(rendered["ws"], 0)
         self.assertEqual(rendered["stats"], 0)
+        self.assertEqual(rendered["connText"], "")
+        self.assertIn("live updates", rendered["connTitle"].lower())
         self.assertEqual(rendered["toggles"], 1)
+
+    def test_status_bar_shows_stop_only_while_a_prompt_runs(self):
+        running = self.run_module(
+            module_url("components", "status-bar.js"),
+            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
+            "state.running_cell = 'c1';"
+            "const bar = mod.renderStatusBar();"
+            "const button = bar.querySelector('.status-stop');"
+            "return { count: bar.querySelectorAll('.status-stop').length,"
+            "  title: button && button.getAttribute('title'),"
+            "  icon: button ? button.querySelectorAll('.icon').length : 0 };",
+        )
+        idle = self.run_module(
+            module_url("components", "status-bar.js"),
+            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
+            "state.running_cell = null;"
+            "return { count: mod.renderStatusBar().querySelectorAll('.status-stop').length };",
+        )
+
+        self.assertEqual(running["count"], 1)
+        self.assertEqual(running["title"], "Stop running prompt")
+        self.assertEqual(running["icon"], 1)
+        self.assertEqual(idle["count"], 0)
+
+    def test_status_bar_shows_image_input_only_when_available(self):
+        base = (
+            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
+            "state.cells = [];"
+        )
+        shown = self.run_module(
+            module_url("components", "status-bar.js"),
+            base
+            + "state.vision = { available: true, model: 'openai:vision-model', state: 'supported' };"
+            "const bar = mod.renderStatusBar();"
+            "const node = bar.querySelector('.vision-status');"
+            "return { count: bar.querySelectorAll('.vision-status').length,"
+            "  title: node && node.attributes.title,"
+            "  icons: node ? node.querySelectorAll('.icon').length : 0 };",
+        )
+        hidden = self.run_module(
+            module_url("components", "status-bar.js"),
+            base + "state.vision = { available: false, model: 'openai:text-only' };"
+            "const bar = mod.renderStatusBar();"
+            "return { count: bar.querySelectorAll('.vision-status').length };",
+        )
+
+        self.assertEqual(shown["count"], 1)
+        self.assertEqual(shown["icons"], 1)
+        self.assertIn("Image input available", shown["title"])
+        self.assertIn("openai:vision-model", shown["title"])
+        self.assertEqual(hidden["count"], 0)
 
     def test_refresh_status_bar_replaces_only_the_status_bar_node(self):
         rendered = self.run_module(
@@ -575,7 +638,6 @@ class StatusBarRenderingTests(WebRenderingTestCase):
             "  replaced: document.getElementById('status-bar') !== bar,"
             "  shellChildren: shell.children.length,"
             "  bars: document.querySelectorAll('#status-bar').length,"
-            "  ws: document.getElementById('status-bar').querySelector('.status-ws').textContent,"
             "  toggles: document.getElementById('status-bar').querySelectorAll('.follow-toggle').length,"
             "};",
         )
@@ -583,8 +645,134 @@ class StatusBarRenderingTests(WebRenderingTestCase):
         self.assertTrue(rendered["replaced"])
         self.assertEqual(rendered["shellChildren"], 1)
         self.assertEqual(rendered["bars"], 1)
-        self.assertEqual(rendered["ws"], "demo")
         self.assertEqual(rendered["toggles"], 1)
+
+    def test_connection_state_is_a_dot_with_a_tooltip(self):
+        rendered = self.run_module(
+            module_url("components", "status-bar.js"),
+            "const shell = document.createElement('div');"
+            "shell.append(mod.renderStatusBar());"
+            "document.body.append(shell);"
+            "mod.setConnection('reconnecting');"
+            "const conn = document.getElementById('status-bar').querySelector('.conn');"
+            "return { text: conn.textContent, title: conn.attributes.title, cls: conn.className };",
+        )
+
+        self.assertEqual(rendered["text"], "")
+        self.assertEqual(rendered["cls"], "conn conn-reconnecting")
+        self.assertIn("reconnecting", rendered["title"].lower())
+
+
+class PromptTraceRenderingTests(WebRenderingTestCase):
+    def test_a_finished_prompt_folds_steps_after_the_final_answer(self):
+        rendered = self.run_module(
+            module_url("components", "cell.js"),
+            """
+            const node = mod.renderCell({
+              id: "p1", kind: "prompt", source: "go", status: "done",
+              execution_count: 1,
+              outputs: [{ output_type: "stream", text: "final answer" }],
+              trace: [
+                { type: "text", content: "long ".repeat(400) },
+                { type: "text", content: "final" },
+              ],
+            }, []);
+            const details = node.querySelector("details.trace-details");
+            const texts = [...node.querySelectorAll(".trace-text")];
+            return {
+              classes: [...node.children].map((child) => child.className || ""),
+              hasDetails: Boolean(details),
+              open: details ? details.getAttribute("open") : null,
+              summary: details ? details.querySelector("summary").textContent : null,
+              texts: texts.map((item) => ({
+                cls: item.className,
+                source: item.dataset.source,
+                more: Boolean(item.querySelector(".trace-more")),
+              })),
+              finalText: node.querySelector(".cell-out-block .markdown")?.innerHTML || "",
+            };
+            """,
+            marked=True,
+        )
+
+        classes = rendered["classes"]
+        self.assertTrue(rendered["hasDetails"])
+        self.assertIsNone(rendered["open"])
+        self.assertIn("Intermediate steps (1)", rendered["summary"])
+        self.assertLess(
+            classes.index("cell-out-block"), classes.index("trace-details")
+        )
+        self.assertIn("final answer", rendered["finalText"])
+        self.assertIn("collapsed", rendered["texts"][0]["cls"])
+        self.assertTrue(rendered["texts"][0]["more"])
+        self.assertFalse(rendered["texts"][0]["source"].startswith("final"))
+
+    def test_a_running_prompt_keeps_the_trace_visible(self):
+        rendered = self.run_module(
+            module_url("components", "cell.js"),
+            """
+            const node = mod.renderCell({
+              id: "p2", kind: "prompt", source: "go", status: "running",
+              trace: [{ type: "text", content: "working" }],
+            }, []);
+            return {
+              details: Boolean(node.querySelector("details.trace-details")),
+              trace: Boolean(node.querySelector(".trace")),
+            };
+            """,
+            marked=True,
+        )
+        self.assertFalse(rendered["details"])
+        self.assertTrue(rendered["trace"])
+
+
+class TraceModalTests(WebRenderingTestCase):
+    def test_the_modal_shows_totals_requests_and_all_steps(self):
+        usage = {
+            "requests": 1,
+            "input_tokens": 1200,
+            "output_tokens": 30,
+            "total_tokens": 1230,
+            "cache_read_tokens": 600,
+            "cost": 0.0012,
+            "tool_calls": 1,
+        }
+        rendered = self.run_module(
+            module_url("components", "trace-modal.js"),
+            "mod.openTraceModal({"
+            "  id: 'p1', kind: 'prompt', status: 'done',"
+            "  usage: " + json.dumps(usage) + ","
+            "  trace: ["
+            "    { type: 'text', content: 'thinking' },"
+            "    { type: 'tool_call', name: 'list_files', args: {}, tool_call_id: 't1' },"
+            "    { type: 'tool_result', name: 'list_files', content: ['a.tif'], outcome: 'success', tool_call_id: 't1' },"
+            "    { type: 'usage', usage: " + json.dumps(usage) + ","
+            "      requests: [Object.assign({}, " + json.dumps(usage) + ", {model: 'openai:test', tools: ['list_files']})] },"
+            "  ],"
+            "});"
+            "const dialog = document.getElementById('dialog');"
+            "const trace = dialog.querySelector('.trace-modal-trace');"
+            "return {"
+            "  cls: dialog.className,"
+            "  stats: dialog.querySelectorAll('.trace-stat').length,"
+            "  text: dialog.textContent,"
+            "  steps: trace ? trace.querySelectorAll('.trace-step').length : 0,"
+            "  toolDetails: trace ? trace.querySelectorAll('details.trace-step.tool-call').length : 0,"
+            "  openToolDetails: trace ? [...trace.querySelectorAll('details.trace-step.tool-call')]"
+            "    .filter((details) => details.getAttribute('open') !== null).length : 0,"
+            "};",
+            marked=True,
+        )
+
+        self.assertIn("trace-dialog", rendered["cls"])
+        self.assertEqual(rendered["stats"], 7)
+        self.assertIn("Run totals", rendered["text"])
+        self.assertIn("Token usage by model request", rendered["text"])
+        self.assertIn("openai:test", rendered["text"])
+        self.assertIn("list_files", rendered["text"])
+        self.assertGreaterEqual(rendered["steps"], 2)
+        self.assertEqual(rendered["toolDetails"], 1)
+        self.assertEqual(rendered["openToolDetails"], 0)
 
 
 class DataTabRenderingTests(WebRenderingTestCase):
@@ -615,7 +803,7 @@ class DataTabRenderingTests(WebRenderingTestCase):
             "  hints: tab.querySelectorAll('.empty-hint').length,"
             "  multiple: inputs.filter((i) => i.attributes.multiple === 'multiple').length,"
             "  folder: inputs.filter((i) => 'webkitdirectory' in i.attributes).length,"
-            "  urlInput: tab.querySelector('input[type=\"url\"]').attributes.placeholder,"
+            "  urlInputs: tab.querySelectorAll('input[type=\"url\"]').length,"
             "  buttons: [...tab.querySelectorAll('.import-row button')]"
             "    .map((button) => button.textContent),"
             "  treeNames: [...tab.querySelectorAll('.tree-name')].map((s) => s.textContent),"
@@ -627,27 +815,12 @@ class DataTabRenderingTests(WebRenderingTestCase):
         self.assertEqual(rendered["hints"], 0)
         self.assertEqual(rendered["multiple"], 1)
         self.assertEqual(rendered["folder"], 1)
-        self.assertEqual(rendered["urlInput"], "https://example.com/file.tif")
+        self.assertEqual(rendered["urlInputs"], 0)
         self.assertIn("Import files…", rendered["buttons"])
         self.assertIn("Import folder…", rendered["buttons"])
-        self.assertIn("Download", rendered["buttons"])
+        self.assertIn("Add from URL…", rendered["buttons"])
         self.assertIn("zones", rendered["treeNames"])
         self.assertIn("roads.geojson", rendered["treeNames"])
-
-    def test_import_url_without_a_url_warns_instead_of_requesting(self):
-        rendered = self.run_module(
-            module_url("pages", "data.js"),
-            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
-            "state.active_workspace = 'demo';"
-            "state.files = [];"
-            "const tab = mod.renderDataTab();"
-            "const rows = tab.querySelectorAll('.import-row');"
-            "const download = rows[rows.length - 1].querySelector('button');"
-            "download.click();"
-            "return { toast: (document.getElementById('toast') || { textContent: '' }).textContent };",
-        )
-
-        self.assertEqual(rendered["toast"], "Enter a URL first")
 
 
 if __name__ == "__main__":

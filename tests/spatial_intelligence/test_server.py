@@ -7,7 +7,6 @@ covered without starting uvicorn.
 
 import contextlib
 import io
-import json
 import os
 import queue
 import sys
@@ -71,14 +70,18 @@ class StateRouteTests(ServerTestCase):
                 "jobs",
                 "map_app_url",
                 "map_project",
+                "running_cell",
                 "settings",
+                "vision",
                 "workspaces",
             ],
         )
         self.assertIsNone(snapshot["active_workspace"])
         self.assertEqual(snapshot["cells"], [])
         self.assertEqual(snapshot["jobs"], [])
+        self.assertIsNone(snapshot["running_cell"])
         self.assertIn("model", snapshot["settings"])
+        self.assertEqual(snapshot["vision"]["available"], False)
 
     def test_the_shell_and_its_scripts_are_served(self):
         index = self.client.get("/")
@@ -143,6 +146,35 @@ class WorkspaceRouteTests(ServerTestCase):
 
         remaining = self.client.delete(f"/api/cells/{cell_id}").json()
         self.assertEqual([cell["id"] for cell in remaining["cells"]], [second])
+
+    def test_deleting_a_cell_twice_is_idempotent_and_broadcast(self):
+        self.open_workspace()
+        snapshot = self.add_cell("prompt", "hello")
+        cell_id = snapshot["cells"][0]["id"]
+        state = deps.app_state()
+        subscriber = state.subscribe()
+
+        first = self.client.delete(f"/api/cells/{cell_id}")
+        second = self.client.delete(f"/api/cells/{cell_id}")
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertNotIn(cell_id, [cell["id"] for cell in second.json()["cells"]])
+        events = []
+        while True:
+            try:
+                events.append(subscriber.get_nowait())
+            except queue.Empty:
+                break
+        state.unsubscribe(subscriber)
+        self.assertTrue(
+            any(
+                event["event"] == "cell_deleted"
+                and event["data"]["id"] == cell_id
+                for event in events
+            ),
+            events,
+        )
 
     def test_an_unknown_cell_kind_is_a_bad_request(self):
         self.open_workspace()
@@ -234,6 +266,77 @@ class FileRouteTests(ServerTestCase):
 
     def test_file_serving_without_a_workspace_is_a_conflict(self):
         self.assertEqual(self.client.get("/api/files/data/x.tif").status_code, 409)
+
+    def test_a_user_file_can_be_renamed(self):
+        self.open_workspace()
+        data = Path(self._tmp.name) / "workspaces" / "demo" / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "old.txt").write_text("x", encoding="utf-8")
+
+        response = self.client.post(
+            "/api/files/rename", json={"path": "data/old.txt", "name": "new.txt"}
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse((data / "old.txt").exists())
+        self.assertTrue((data / "new.txt").is_file())
+        self.assertIn("data/new.txt", response.json()["files"])
+
+    def test_rename_refuses_an_existing_name(self):
+        self.open_workspace()
+        data = Path(self._tmp.name) / "workspaces" / "demo" / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "a.txt").write_text("a", encoding="utf-8")
+        (data / "b.txt").write_text("b", encoding="utf-8")
+
+        response = self.client.post(
+            "/api/files/rename", json={"path": "data/a.txt", "name": "b.txt"}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue((data / "a.txt").is_file())
+        self.assertTrue((data / "b.txt").is_file())
+
+    def test_rename_refuses_a_path_as_a_name(self):
+        self.open_workspace()
+        data = Path(self._tmp.name) / "workspaces" / "demo" / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "a.txt").write_text("a", encoding="utf-8")
+
+        response = self.client.post(
+            "/api/files/rename", json={"path": "data/a.txt", "name": "../escape.txt"}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue((data / "a.txt").is_file())
+
+    def test_a_user_file_can_be_deleted(self):
+        self.open_workspace()
+        data = Path(self._tmp.name) / "workspaces" / "demo" / "data"
+        nested = data / "nested"
+        nested.mkdir(parents=True, exist_ok=True)
+        (nested / "gone.txt").write_text("x", encoding="utf-8")
+
+        response = self.client.post(
+            "/api/files/delete", json={"path": "data/nested/gone.txt"}
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse((nested / "gone.txt").exists())
+        self.assertFalse(nested.exists())
+        self.assertNotIn("data/nested/gone.txt", response.json()["files"])
+
+    def test_harness_files_cannot_be_deleted_or_renamed(self):
+        self.open_workspace()
+
+        for path in ("notebook.ipynb", "workspace.json", "maps/current.geolibre.json"):
+            with self.subTest(path=path):
+                deleted = self.client.post("/api/files/delete", json={"path": path})
+                renamed = self.client.post(
+                    "/api/files/rename", json={"path": path, "name": "x"}
+                )
+                self.assertEqual(deleted.status_code, 400)
+                self.assertEqual(renamed.status_code, 400)
 
 
 class EventStreamTests(ServerTestCase):

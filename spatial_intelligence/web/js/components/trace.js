@@ -1,6 +1,7 @@
 /* Agent trace: one ordered renderer, plus a live fast path for streamed text. */
 
 import { codeBlock, compactPreview, el, prettyValue } from "../dom.js";
+import { icon } from "../icons.js";
 import { jobsFor, state, stepKey } from "../store.js";
 import { cellOutputText, renderMarkdown, visibleTraceGroups } from "./markdown.js";
 import { planFromTrace, renderPlan } from "./plan.js";
@@ -17,6 +18,11 @@ already hold one like it.
 */
 const pendingTrace = new Map();
 let awaitingSnapshot = true;
+
+/* Long reasoning is folded by default; the reader can open it once. */
+const expandedText = new Set();
+const TEXT_LINE_LIMIT = 12;
+const TEXT_CHAR_LIMIT = 1200;
 
 function isCodeTool(name) {
   return name === "run_python";
@@ -81,10 +87,9 @@ function toolStepNode(group) {
     "data-trace-key": "call:" + ((call && call.tool_call_id) || name),
   });
   const summary = el("summary", {});
-  summary.append(
-    el("span", { class: "trace-icon", text: "→" }),
-    el("span", { class: "trace-name", text: name || "" })
-  );
+  const mark = el("span", { class: "trace-icon" });
+  mark.append(icon("arrow-right", { size: 13 }));
+  summary.append(mark, el("span", { class: "trace-name", text: name || "" }));
   const preview = toolPreview(name, call, result, isCode);
   if (preview) summary.append(el("span", { class: "trace-preview", text: preview }));
   details.append(summary);
@@ -101,10 +106,33 @@ function toolStepNode(group) {
   return details;
 }
 
-function traceTextNode(content) {
+function traceTextNode(content, cellId, index) {
   const node = el("div", { class: "trace-step trace-text markdown" });
   node.dataset.source = content || "";
-  node.innerHTML = renderMarkdown(node.dataset.source);
+  const body = el("div", { class: "trace-text-body" });
+  body.innerHTML = renderMarkdown(node.dataset.source);
+  node.append(body);
+
+  const source = node.dataset.source;
+  const lines = source.split("\n").length;
+  if (lines <= TEXT_LINE_LIMIT && source.length <= TEXT_CHAR_LIMIT) return node;
+
+  const key = String(cellId || "") + ":" + String(index);
+  const open = expandedText.has(key);
+  node.classList.toggle("collapsed", !open);
+  const more = el("button", {
+    type: "button",
+    class: "trace-more",
+    text: open ? "Show less" : "View more",
+    "aria-expanded": String(open),
+  });
+  more.addEventListener("click", () => {
+    const collapsed = node.classList.toggle("collapsed");
+    expandedText[collapsed ? "delete" : "add"](key);
+    more.textContent = collapsed ? "View more" : "Show less";
+    more.setAttribute("aria-expanded", String(!collapsed));
+  });
+  node.append(more);
   return node;
 }
 
@@ -173,15 +201,6 @@ export function groupTraceSteps(trace) {
   return groups;
 }
 
-/** Render one grouped trace step; usage groups live in the status bar instead. */
-export function renderStepNode(group) {
-  if (!group) return null;
-  if (group.type === "text") return traceTextNode(group.content);
-  if (group.type === "tool") return toolStepNode(group);
-  if (group.type === "plan") return renderPlan(group.items);
-  return null;
-}
-
 /**
  * One cell's trace steps, each entry carrying the trace index it starts at.
  *
@@ -200,7 +219,10 @@ function traceEntries(trace, cell) {
   );
   for (const group of groups) {
     if (group.type === "text") {
-      entries.push({ index: group.index, nodes: [traceTextNode(group.content)] });
+      entries.push({
+        index: group.index,
+        nodes: [traceTextNode(group.content, cell && cell.id, group.index)],
+      });
     } else if (group.type === "tool") {
       const toolNode = toolStepNode(group);
       const nodes = [toolNode];

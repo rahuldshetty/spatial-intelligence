@@ -170,6 +170,14 @@ class MapLayerServiceTests(MapTestCase):
         layer = layerops.find_layer(self.map, layer_id)
         self.assertEqual(layer["sourcePath"], url_for("data/dem.tif"))
         self.assertEqual(layer["metadata"][layerops.LOCAL_SOURCE_KEY], "data/dem.tif")
+        state = layer["metadata"]["rasterState"]
+        self.assertEqual(state["gamma"], 1)
+        self.assertEqual(state["opacity"], 1)
+        self.assertEqual(state["stretch"], "linear")
+        self.assertEqual(state["nodata"], "auto")
+        self.assertEqual(state["mode"], "single")
+        self.assertEqual(state["bands"], [1])
+        self.assertEqual(state["colormap"], "gray")
         reloaded = layerops.find_layer(self.reload_map(), layer_id)
         self.assertEqual(reloaded["sourcePath"], url_for("data/dem.tif"))
         self.assertEqual(reloaded["metadata"][layerops.LOCAL_SOURCE_KEY], "data/dem.tif")
@@ -275,6 +283,36 @@ class MapLayerServiceTests(MapTestCase):
         self.assertEqual(
             layerops.find_layer(self.map, layer_id)["sourcePath"], url_for("data/scene.tif")
         )
+
+    def test_rename_local_sources_repoints_the_layer(self):
+        self.write("data/scene.tif", b"scene")
+        layer_id = layerops.add_raster(
+            self.workspace, self.map, "data/scene.tif", "Scene", file_url=url_for
+        )
+
+        count = layerops.rename_local_sources(
+            self.map, self.workspace, "data/scene.tif", "data/moved.tif", url_for
+        )
+
+        layer = layerops.find_layer(self.map, layer_id)
+        self.assertEqual(count, 1)
+        self.assertEqual(layer["sourcePath"], url_for("data/moved.tif"))
+        self.assertEqual(
+            layer["metadata"][layerops.LOCAL_SOURCE_KEY], "data/moved.tif"
+        )
+
+    def test_remove_local_sources_drops_layers_that_served_the_file(self):
+        self.write("data/scene.tif", b"scene")
+        layer_id = layerops.add_raster(
+            self.workspace, self.map, "data/scene.tif", "Scene", file_url=url_for
+        )
+
+        removed = layerops.remove_local_sources(
+            self.map, self.workspace, "data/scene.tif"
+        )
+
+        self.assertEqual(removed, [layer_id])
+        self.assertIsNone(layerops.find_layer(self.map, layer_id))
 
     def test_repoint_leaves_remote_layers_alone(self):
         layer_id = self.map.add_raster("https://example.com/remote.tif", "Remote")
@@ -728,6 +766,7 @@ class LayersPackTests(MapTestCase):
         registry = self.build_pack([], [])
         expected = {
             "describe_map": frozenset({Effect.READ}),
+            "get_drawn_features": frozenset({Effect.READ}),
             "describe_geolibre_bridge": frozenset({Effect.READ}),
             "list_colormaps": frozenset({Effect.READ}),
             "list_style_keys": frozenset({Effect.READ}),
@@ -757,7 +796,8 @@ class LayersPackTests(MapTestCase):
         for name, effects in expected.items():
             self.assertEqual(registry.get(name).effects, effects, name)
         self.assertEqual(
-            registry.core_names(), {"describe_map", "describe_geolibre_bridge"}
+            registry.core_names(),
+            {"describe_map", "get_drawn_features", "describe_geolibre_bridge"},
         )
         self.assertNotIn("zoom_to_layer", registry)
         self.assertEqual(registry.categories(), {"layers": tuple(expected)})

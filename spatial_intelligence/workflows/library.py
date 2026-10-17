@@ -30,7 +30,7 @@ scene over the AOI, download it into data/ (add_catalog_scene), and clip it to t
 AOI. Then run the model above the way its route describes, add_geojson the result
 and fit_bounds the AOI. Keep outputs under results/ and report their paths.
 
-Extra instructions: {notes}
+Analysis goal: {notes}
 """
 
 DETECTION_PROMPT = """\
@@ -46,23 +46,22 @@ aerial or drone imagery (Vantor, OpenAerialMap) over 10 m satellite pixels: clip
 the AOI, run the model above the way its route describes, then add_geojson the
 result and fit_bounds the AOI. Keep outputs under results/ and report their paths.
 
-Extra instructions: {notes}
+Analysis goal: {notes}
 """
 
 CHANGE_PROMPT = """\
-Measure what changed between two dates over the area of interest and show it on the map.
+Measure what changed over the area of interest and show it on the map.
 
 Area of interest: {aoi}
-Earlier input: {before}
-Later input: {after}
+Analysis goal: {notes}
 
-Work with the tools you have: download both inputs into data/ when they are not
-local, clip both to the AOI, and compute the change with run_python (band math over
-the aligned rasters) when no tool covers it. Polygonize the changed area, then
+Work with the tools you have: choose two comparable dates over the AOI. When the
+goal names dates, sensors, an index, or a threshold, use them; otherwise choose the
+most recent usable pair for the area. Search the catalogs, download both scenes
+into data/, clip both to the AOI, and compute the change with run_python (band math
+over the aligned rasters) when no tool covers it. Polygonize the changed area, then
 add_geojson the result and fit_bounds the AOI. Keep outputs under results/ and
 report their paths, the two dates, and the index or threshold you used.
-
-Extra instructions: {notes}
 """
 
 
@@ -216,10 +215,17 @@ AOI_FIELD = InteractionField(
 
 NOTES_FIELD = InteractionField(
     id="notes",
-    label="Extra instructions",
-    type="text",
+    label="Analysis goal",
+    type="textarea",
     required=False,
-    placeholder="Anything the analysis should honour (optional)",
+    description=(
+        "Describe what you want to learn or produce. Dates, sensors, an index, a "
+        "threshold, or a custom prompt all belong here; the agent follows it. Optional."
+    ),
+    placeholder=(
+        "e.g. Map new construction between June 2024 and June 2025 using "
+        "Sentinel-2, then measure the changed area inside the AOI."
+    ),
 )
 
 
@@ -241,6 +247,10 @@ WORKFLOWS: tuple[WorkflowSpec, ...] = (
                 label="Input data",
                 type="text",
                 required=False,
+                description=(
+                    "Accepted formats: a workspace path (data/…), an https URL, or a "
+                    "STAC scene key. Leave empty to search the catalogs for the AOI."
+                ),
                 placeholder="path in data/, a URL, or a scene key — leave empty to search the catalogs",
             ),
             NOTES_FIELD,
@@ -267,6 +277,10 @@ WORKFLOWS: tuple[WorkflowSpec, ...] = (
                 label="Input data",
                 type="text",
                 required=False,
+                description=(
+                    "Accepted formats: a workspace path (data/…), an https URL, or a "
+                    "STAC scene key. Leave empty to search the catalogs for the AOI."
+                ),
                 placeholder="path in data/, a URL, or a scene key — leave empty to search the catalogs",
             ),
             NOTES_FIELD,
@@ -286,22 +300,7 @@ WORKFLOWS: tuple[WorkflowSpec, ...] = (
         id="change-detection",
         label="Change detection",
         summary="Compare two dates over an AOI and map what changed.",
-        params=(
-            AOI_FIELD,
-            InteractionField(
-                id="before",
-                label="Earlier input",
-                type="text",
-                placeholder="path in data/, a URL, a scene key, or a date + collection",
-            ),
-            InteractionField(
-                id="after",
-                label="Later input",
-                type="text",
-                placeholder="path in data/, a URL, a scene key, or a date + collection",
-            ),
-            NOTES_FIELD,
-        ),
+        params=(AOI_FIELD, NOTES_FIELD),
         prompt=CHANGE_PROMPT,
         requires=(
             "search_stac_scenes",

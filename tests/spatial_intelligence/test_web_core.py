@@ -167,13 +167,16 @@ class ShimNode {
     this.children = [textNode(value)];
   }
   get innerHTML() {
-    return this.children.map((child) => child.textContent).join("");
+    // Markup is kept out of textContent, as in a real DOM: SVG icons and
+    // rendered HTML do not leak their tags into the visible text.
+    return this._html === undefined ? this.children.map((child) => child.textContent).join("") : this._html;
   }
   set innerHTML(value) {
     this.children.forEach((child) => {
       child.parentNode = null;
     });
-    this.children = value ? [textNode(value)] : [];
+    this.children = [];
+    this._html = value ? String(value) : "";
   }
   setAttribute(name, value) {
     this.attributes.set(name, String(value));
@@ -753,7 +756,7 @@ if (gated) {
       "store.js": ["state", "setState", "subscribe", "notify", "isGeneratedCell", "normalizeCells", "jobsFor", "upsertJob", "usageTotals", "applySnapshot"],
       "api.js": ["request", "getState", "updateSettings", "createWorkspace", "openWorkspace", "saveWorkspace", "closeWorkspace", "addCell", "updateCell", "deleteCell", "moveCell", "runCell", "stopCell", "runAll", "respondInteraction", "cancelInteraction", "importFiles", "importUrl", "setMapProject", "reportBridge"],
       "events.js": ["connectEvents"],
-      "pages/shell.js": ["mountShell", "renderShell", "renderSidePanel", "renderActiveTab", "renderTabContent"],
+      "pages/shell.js": ["mountShell", "renderShell", "renderSidePanel", "renderTabContent"],
       "pages/map.js": ["mountMap", "syncMap"],
       "components/menubar.js": ["renderMenubar", "closeAllMenus"],
       "components/settings-dialog.js": ["openSettingsDialog"],
@@ -824,7 +827,16 @@ await scenario("map", async () => {
   eq(
     "map.bridge_handshake",
     handshake && handshake.body,
-    JSON.stringify({ version: "1.2", methods: ["project.load", "project.request_state"] })
+    JSON.stringify({
+      version: "1.2",
+      methods: [
+        "project.load",
+        "project.request_state",
+        "toImage",
+        "getView",
+        "getDrawnFeatures",
+      ],
+    })
   );
   eq("map.loads_project_on_ready", posted.length, 1);
   eq("map.load_project_message", posted[0].message, { type: "geolibre:load-project", seq: 1, project: store.state.map_project });
@@ -838,12 +850,16 @@ await scenario("map", async () => {
   });
   await tick();
   eq("map.persists_child_state", fetchCalls.filter((call) => call.url === "/api/map/project").length, 1);
+  eq(
+    "map.tracks_child_state",
+    store.state.map_project,
+    { layers: [{ id: "a" }], view: { center: [0, 0] } }
+  );
   map.syncMap();
   eq("map.suppresses_echo", posted.length, 0);
 
   posted.length = 0;
-  sendMessage(ORIGIN, iframe.contentWindow, { type: "geolibre:state", project: { layers: [{ id: "b" }] } });
-  await tick();
+  store.state.map_project = { layers: [{ id: "server" }] };
   map.syncMap();
   eq("map.reposts_after_divergence", posted.length, 1);
   eq("map.seq_increments", posted[0].message.seq, 2);
@@ -883,7 +899,7 @@ await scenario("scroll", async () => {
   const button = scroll.followToggle();
   const box = button.querySelector("input");
   const label = button.textContent;
-  eq("scroll.toggle_starts_off", [scroll.isFollowing(), box.checked, label], [false, false, "Follow output"]);
+  eq("scroll.toggle_starts_off", [scroll.isFollowing(), box.checked, label], [false, false, "Follow"]);
 
   // Following is the reader's choice: a scroll while it is off changes nothing.
   panel.scrollTop = 0;

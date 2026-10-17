@@ -378,6 +378,9 @@ def render_value(field: InteractionField, value: object, verdict=None) -> str:
     if field.type == "radio":
         chosen = "" if value in (None, "") else str(value)
         return option_label(field, chosen) if chosen else EMPTY
+    if field.type == "textarea":
+        text = str(value or "").replace("\r\n", "\n").strip()
+        return text or EMPTY
     text = " ".join(str(value).split()) if value not in (None, "") else ""
     return text or EMPTY
 
@@ -394,6 +397,35 @@ def answers_for(spec: WorkflowSpec, params: dict) -> dict[str, object]:
     return answers
 
 
+def attachment_entries(params: dict) -> list[dict[str, str]]:
+    """The optional files the wizard attached, with the user's notes.
+
+    Paths are workspace-relative and are transferred by the browser after the
+    workspace is created; descriptions are plain user text for the agent.
+    """
+    raw = params.get("attachments") if isinstance(params, dict) else None
+    entries: list[dict[str, str]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        path = " ".join(str(item.get("path") or "").split())
+        if not path:
+            continue
+        description = " ".join(str(item.get("description") or "").split())
+        entries.append({"path": path, "description": description})
+    return entries
+
+
+def _attachment_prompt(entries: list[dict[str, str]]) -> str:
+    if not entries:
+        return ""
+    lines = ["Attached inputs (already copied into the workspace):"]
+    for entry in entries:
+        note = f" — {entry['description']}" if entry["description"] else ""
+        lines.append(f"- {entry['path']}{note}")
+    return "\n".join(lines)
+
+
 def prompt_text(spec: WorkflowSpec, params: dict, verdict=None) -> str:
     """Render the workflow's prompt from the submitted answers."""
     if not spec.prompt:
@@ -403,7 +435,9 @@ def prompt_text(spec: WorkflowSpec, params: dict, verdict=None) -> str:
         field.id: render_value(field, answers.get(field.id), verdict)
         for field in spec.params
     }
-    return spec.prompt.format_map(rendered).strip()
+    text = spec.prompt.format_map(rendered).strip()
+    attached = _attachment_prompt(attachment_entries(params))
+    return text + ("\n\n" + attached if attached else "")
 
 
 def _cell_line(text: object) -> str:
@@ -421,6 +455,12 @@ def markdown_record(spec: WorkflowSpec, params: dict, verdict=None) -> str:
         lines.append(
             f"| {_cell_line(field.label)} | {_cell_line(rendered)} |"
         )
+    attached = attachment_entries(params)
+    if attached:
+        lines += ["", "**Attached inputs**", ""]
+        for entry in attached:
+            note = f" — {entry['description']}" if entry["description"] else ""
+            lines.append(f"- `{entry['path']}`{note}")
     lines += [
         "",
         "The prompt cell below runs this workflow. Edit it or re-run it as often as you like; "
@@ -440,7 +480,7 @@ def workflow_metadata(spec: WorkflowSpec, params: dict, aoi: dict | None) -> dic
         )
         for field in spec.params
     }
-    return {
+    result = {
         "id": spec.id,
         "label": spec.label,
         "summary": spec.summary,
@@ -450,6 +490,10 @@ def workflow_metadata(spec: WorkflowSpec, params: dict, aoi: dict | None) -> dic
         ),
         "created_at": now_iso(),
     }
+    attached = attachment_entries(params)
+    if attached:
+        result["attachments"] = attached
+    return result
 
 
 def seed(
@@ -463,6 +507,10 @@ def seed(
     its task open.
     """
     answers = answers_for(spec, params)
+    # Attachments are not workflow fields, but the prompt and the provenance
+    # record need them; carry them alongside the validated answers.
+    if isinstance(params, dict) and params.get("attachments") is not None:
+        answers["attachments"] = params["attachments"]
     aoi = None
     for field in spec.params:
         if field.type == "aoi" and answers.get(field.id) not in (None, "", {}):

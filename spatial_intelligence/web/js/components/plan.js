@@ -1,6 +1,7 @@
 /* Agent plan: the checklist a write_plan tool call maintains. */
 
 import { el } from "../dom.js";
+import { icon } from "../icons.js";
 
 export function planFromTrace(steps) {
   let items = null;
@@ -15,17 +16,19 @@ function statusOf(item) {
 }
 
 function planStatusIcon(status) {
-  if (status === "completed") return "✓";
-  if (status === "in_progress") return "●";
-  if (status === "cancelled") return "×";
-  if (status === "blocked") return "!";
-  return "○";
+  if (status === "completed") return "check-circle";
+  if (status === "in_progress") return "loader-circle";
+  if (status === "cancelled") return "ban";
+  if (status === "blocked") return "alert-triangle";
+  return "circle";
 }
 
 function planItemNode(item) {
   const status = statusOf(item);
   const li = el("li", { class: "plan-item plan-" + status });
-  li.append(el("span", { class: "plan-item-icon", text: planStatusIcon(status) }));
+  const mark = el("span", { class: "plan-item-icon" });
+  mark.append(icon(planStatusIcon(status), { size: 13, class: "plan-mark-" + status }));
+  li.append(mark);
   const text = status === "in_progress" && item.active_form ? item.active_form : item.content;
   li.append(el("span", { class: "plan-item-text", text: text || item.content || "" }));
   return li;
@@ -46,8 +49,10 @@ export function renderPlan(items) {
   }).length;
   const details = el("details", { class: "trace-step trace-plan", open: true });
   const summary = el("summary", {});
+  const planIcon = el("span", { class: "trace-icon" });
+  planIcon.append(icon("list-todo", { size: 13 }));
   summary.append(
-    el("span", { class: "trace-icon", text: "☑" }),
+    planIcon,
     el("span", { class: "trace-name", text: "Plan" }),
     el("span", { class: "trace-preview", text: done + "/" + total + " done" })
   );

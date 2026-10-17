@@ -51,6 +51,8 @@ __all__ = [
     "list_colormaps",
     "list_style_keys",
     "remove_layer",
+    "remove_local_sources",
+    "rename_local_sources",
     "repoint_local_rasters",
     "save_map",
     "set_basemap",
@@ -211,6 +213,42 @@ def repoint_local_rasters(
     return count
 
 
+def rename_local_sources(
+    map_obj: Map,
+    workspace: Workspace,
+    old_rel: str,
+    new_rel: str,
+    file_url: Callable[[str], str],
+) -> int:
+    """Point layers that served ``old_rel`` at ``new_rel`` after a rename."""
+    count = 0
+    url = file_url(new_rel)
+    for layer in layers(map_obj):
+        if _local_rel_for_layer(layer, workspace) != old_rel:
+            continue
+        source = layer.get("source")
+        if isinstance(source, dict):
+            source["url"] = url
+        layer["sourcePath"] = url
+        layer.setdefault("metadata", {})[LOCAL_SOURCE_KEY] = new_rel
+        count += 1
+    return count
+
+
+def remove_local_sources(map_obj: Map, workspace: Workspace, rel: str) -> list[str]:
+    """Remove layers that served ``rel`` after the file was deleted."""
+    removed: list[str] = []
+    for layer in list(layers(map_obj)):
+        if _local_rel_for_layer(layer, workspace) != rel:
+            continue
+        layer_id = layer.get("id")
+        if layer_id is None:
+            continue
+        map_obj.remove_layer(layer_id)
+        removed.append(str(layer_id))
+    return removed
+
+
 # -- writers ---------------------------------------------------------------
 
 
@@ -314,7 +352,7 @@ def add_raster(
     name = clean_layer_name(name)
     rel = None
     if not _is_url(path):
-        resolved = workspace.resolve(path, must_exist=True)
+        workspace.resolve(path, must_exist=True)
         # The app loads a COG: handed a striped GeoTIFF it asks its Python
         # sidecar to convert the file, and this harness embeds the static app
         # without that sidecar, so the conversion could never succeed. Convert
@@ -328,8 +366,43 @@ def add_raster(
     )
     if rel is not None and file_url is not None:
         _tag_local_source(map_obj, layer_id, rel)
+    _complete_raster_state(map_obj, layer_id, bands, colormap, rescale_arg)
     persist_map(map_obj, workspace)
     return layer_id
+
+
+def _complete_raster_state(
+    map_obj: Map,
+    layer_id: str,
+    bands: list[int] | None,
+    colormap: str | None,
+    rescale: list[list[float]] | None,
+) -> None:
+    """Fill the raster-control defaults before the app ever sees the layer.
+
+    GeoLibre's bundled layer control expects a complete raster state (including
+    ``gamma``) and its restore path can render before its own normalizer runs.
+    Persisting the defaults here avoids a transient
+    ``e.gamma.toFixed is not a function`` error when the layer lands on the map.
+    """
+    layer = find_layer(map_obj, layer_id)
+    if layer is None:
+        return
+    metadata = layer.setdefault("metadata", {})
+    state = metadata.setdefault("rasterState", {})
+    band_list = list(bands) if bands else [1]
+    state.setdefault("mode", "rgb" if len(band_list) >= 3 else "single")
+    state.setdefault("bands", band_list)
+    state.setdefault("rescale", rescale)
+    state.setdefault("colormap", colormap or "gray")
+    state.setdefault("reversed", False)
+    state.setdefault("nodata", "auto")
+    state.setdefault("gamma", 1)
+    state.setdefault("stretch", "linear")
+    state.setdefault("opacity", 1)
+    state.setdefault("visible", True)
+    state.setdefault("minZoom", 0)
+    state.setdefault("maxZoom", 24)
 
 
 def add_tile_layer(

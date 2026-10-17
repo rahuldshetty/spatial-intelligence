@@ -15,6 +15,7 @@ about them.
 from __future__ import annotations
 
 from ..contracts.effects import READ_ONLY, Effect
+from ..contracts.services import VISION_SERVICE
 from .packs.ai import AIPack
 from .packs.capabilities import CapabilityPack
 from .packs.catalog import CatalogPack
@@ -27,6 +28,7 @@ from .packs.raster import RasterPack
 from .packs.segmentation import SegmentationPack
 from .packs.skills import SkillsPack
 from .packs.vector import VectorPack
+from .packs.vision import VisionPack
 from .registry import PLAN_MUTATION_TAG, ToolRegistry
 from .runtime import ToolRuntime
 
@@ -87,8 +89,12 @@ def default_registry(runtime: ToolRuntime) -> ToolRegistry:
     # Orientation and data acquisition.
     registry.add_pack(FilesPack, runtime)
     registry.add_pack(CatalogPack, runtime)
-    # Map authoring.
+    # Map authoring, plus the image tool only when the endpoint proved it can
+    # accept images. A text-only model must not see a tool it cannot serve.
     registry.add_pack(LayersPack, runtime)
+    vision = runtime.services.get(VISION_SERVICE)
+    if vision is not None and getattr(vision, "supported", False):
+        registry.add_pack(VisionPack, runtime)
     # Processing.
     registry.add_pack(RasterPack, runtime)
     registry.add_pack(VectorPack, runtime)

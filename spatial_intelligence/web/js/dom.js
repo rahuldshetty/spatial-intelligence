@@ -2,8 +2,18 @@
 
 "use strict";
 
+import { icon } from "./icons.js";
+
 let toastTimer = null;
 let dialogCleanup = null;
+let dialogCleanupFocus = null;
+
+const TOAST_ICONS = {
+  info: "circle",
+  success: "check-circle",
+  warning: "alert-triangle",
+  error: "x-circle",
+};
 
 export function el(tag, attrs, children) {
   const node = document.createElement(tag);
@@ -31,18 +41,25 @@ export function appendChildren(node, ...children) {
   node.append(...children.filter((child) => child != null));
 }
 
-export function toast(message) {
+export function toast(message, kind = "info") {
+  const variant = TOAST_ICONS[kind] ? kind : "info";
   let node = document.getElementById("toast");
   if (!node) {
     node = el("div", { id: "toast" });
     document.body.append(node);
   }
-  node.textContent = message;
+  node.className = "toast toast-" + variant;
+  node.setAttribute("role", variant === "error" ? "alert" : "status");
+  node.setAttribute("aria-live", variant === "error" ? "assertive" : "polite");
+  node.replaceChildren(
+    icon(TOAST_ICONS[variant], { size: 15 }),
+    el("span", { class: "toast-text", text: message })
+  );
   node.style.display = "block";
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     node.style.display = "none";
-  }, 4000);
+  }, variant === "error" ? 7000 : 4000);
 }
 
 function dismissMenus() {
@@ -56,14 +73,63 @@ export function openDialog(buildContent, options) {
     id: "overlay",
     class: "open" + (passthrough ? " passthrough" : ""),
   });
-  const dialog = el("div", { id: "dialog" });
+  const dialog = el("div", { id: "dialog", role: "dialog", "aria-modal": "true" });
   overlay.append(dialog);
   document.body.append(overlay);
-  dialogCleanup = () => overlay.remove();
+  dialogCleanupFocus = document.activeElement;
+  dialogCleanup = () => {
+    overlay.remove();
+    const previous = dialogCleanupFocus;
+    dialogCleanupFocus = null;
+    if (previous && typeof previous.focus === "function") previous.focus();
+  };
   buildContent(dialog);
+  if (!dialog.querySelector(".dialog-close")) {
+    const close = el("button", {
+      class: "dialog-close",
+      type: "button",
+      title: "Close",
+      "aria-label": "Close dialog",
+      onclick: closeDialog,
+    });
+    close.append(icon("x", { size: 16 }));
+    dialog.append(close);
+  }
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay) closeDialog();
   });
+  overlay.addEventListener("keydown", trapDialogKeys);
+  window.requestAnimationFrame(() => {
+    const target =
+      dialog.querySelector("input:not([type=hidden]), select, textarea") ||
+      dialog.querySelector(".primary") ||
+      dialog.querySelector(".dialog-close");
+    if (target && typeof target.focus === "function") target.focus();
+  });
+}
+
+function trapDialogKeys(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeDialog();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = Array.from(
+    event.currentTarget.querySelectorAll(
+      "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+    )
+  );
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 export function closeDialog() {
@@ -71,6 +137,52 @@ export function closeDialog() {
     dialogCleanup();
     dialogCleanup = null;
   }
+}
+
+/** Ask before a destructive or interrupting action. ``onConfirm`` may be async. */
+export function confirmDialog({
+  title,
+  message,
+  confirmLabel = "Confirm",
+  danger = false,
+  onConfirm,
+}) {
+  openDialog((dialog) => {
+    const heading = el("div", { class: "dialog-heading" });
+    heading.append(
+      el("h3", { text: title }),
+      el("p", { class: "dialog-subtitle", text: message })
+    );
+    const status = el("p", { class: "dialog-status" });
+    const cancel = el("button", {
+      type: "button",
+      text: "Cancel",
+      onclick: closeDialog,
+    });
+    const confirm = el("button", {
+      type: "button",
+      class: danger ? "danger" : "primary",
+      text: confirmLabel,
+    });
+    const actions = el("div", { class: "dialog-actions" });
+    actions.append(cancel, confirm);
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      cancel.disabled = true;
+      status.className = "dialog-status";
+      status.textContent = "Working…";
+      try {
+        await onConfirm();
+        closeDialog();
+      } catch (error) {
+        status.className = "dialog-status error";
+        status.textContent = error.message || String(error);
+        confirm.disabled = false;
+        cancel.disabled = false;
+      }
+    });
+    dialog.append(heading, status, actions);
+  });
 }
 
 export function dialogActions(dialog, primary, onConfirm) {

@@ -15,6 +15,7 @@ from __future__ import annotations
 import platform
 import sys
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from .. import __version__
 from ..discovery import CAPABILITIES

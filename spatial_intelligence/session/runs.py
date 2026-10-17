@@ -114,20 +114,15 @@ class RunQueue:
 
     # -- queries ---------------------------------------------------------
 
-    def is_queued(self, cell_id: str) -> bool:
-        """Whether ``cell_id`` is waiting to start."""
-        with self._lock:
-            return cell_id in self._queued
-
-    def is_running(self, cell_id: str) -> bool:
-        """Whether ``cell_id`` currently holds a cancellation token."""
-        with self._lock:
-            return cell_id in self._tokens
-
     def active(self) -> bool:
         """Whether anything is running or waiting."""
         with self._lock:
             return bool(self._tokens or self._queued)
+
+    def active_id(self) -> str | None:
+        """Return the cell currently executing, or ``None`` between runs."""
+        with self._lock:
+            return next(iter(self._tokens), None)
 
     def wait_idle(self, timeout: float | None = None) -> bool:
         """Block until no cell is running or queued.

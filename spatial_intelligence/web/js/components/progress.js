@@ -1,6 +1,7 @@
 /* Job progress: one component for every job kind, mounted standalone or in a cell. */
 
 import { appendChildren, el, formatBytes } from "../dom.js";
+import { icon } from "../icons.js";
 
 function jobStatusLabel(job) {
   if (job.status === "done") return "complete";
@@ -80,9 +81,11 @@ export function renderJob(job, variant = "cell") {
 
   if (variant === "trace") {
     const summary = el("div", { class: "download-trace-summary" });
+    const mark = el("span", { class: "trace-icon" });
+    mark.append(icon("download", { size: 13 }));
     appendChildren(
       summary,
-      el("span", { class: "trace-icon", text: "↓" }),
+      mark,
       el("span", { class: "trace-name", text: job.kind || "job" }),
       el("span", {
         class: "trace-preview download-filename",
@@ -106,8 +109,6 @@ export function renderJob(job, variant = "cell") {
   updateJob(node, job);
   return node;
 }
-
-export { renderJob as renderJobNode };
 
 /** Refresh a job node in place after a progress event. */
 export function updateJob(node, job) {

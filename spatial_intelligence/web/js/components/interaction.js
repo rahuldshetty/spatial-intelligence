@@ -2,7 +2,7 @@
 
 import { el } from "../dom.js";
 import { cancelInteraction, getState, respondInteraction } from "../api.js";
-import { normalizeCells, setState } from "../store.js";
+import { normalizeCells, setState, state } from "../store.js";
 import { renderCellsOnly } from "../pages/cells.js";
 import { buildField } from "./fields.js";
 
@@ -46,8 +46,9 @@ export function renderInteraction(cell, interaction = cell.interaction) {
         onclick: async () => {
           try {
             await cancelInteraction(cell.id, request.id);
-            cell.status = "stopped";
-            cell.interaction = null;
+            const current = state.cells.find((item) => item.id === cell.id) || cell;
+            current.status = "stopped";
+            current.interaction = null;
             renderCellsOnly();
           } catch (e) {
             error.textContent = e.message || String(e);

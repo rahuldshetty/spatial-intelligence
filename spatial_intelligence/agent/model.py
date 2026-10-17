@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 #: Model kinds served by an OpenAI-compatible endpoint. Each is routed through an
 #: ``OpenAIProvider`` bound to ``OPENAI_BASE_URL``.
@@ -53,6 +54,45 @@ def _custom_base_url() -> str:
     if base_url.endswith("/chat/completions"):
         base_url = base_url[: -len("/chat/completions")].rstrip("/")
     return base_url
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAIEndpoint:
+    """Where an OpenAI-compatible model actually lives on the wire."""
+
+    base_url: str
+    model: str
+    api_key: str
+    api: str
+    """``chat`` for Chat Completions, ``responses`` for the Responses API."""
+
+
+def openai_endpoint(model: object) -> OpenAIEndpoint | None:
+    """Return the HTTP endpoint for an OpenAI-compatible model string.
+
+    ``None`` means this provider is not OpenAI-compatible, so image-input
+    support cannot be checked through the same probe. A custom
+    ``OPENAI_BASE_URL`` wins; without it the public OpenAI API is used.
+    """
+    if not isinstance(model, str):
+        return None
+    kind, separator, name = model.partition(":")
+    if not separator or kind not in _OPENAI_KINDS or not name.strip():
+        return None
+    base_url = _custom_base_url() or "https://api.openai.com/v1"
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not _custom_base_url() and not api_key:
+        # The public API needs a key; callers still get a useful endpoint so a
+        # probe can report a credential failure instead of "not supported".
+        api_key = ""
+    elif not api_key:
+        api_key = _KEYLESS_API_KEY
+    return OpenAIEndpoint(
+        base_url=base_url,
+        model=name.strip(),
+        api_key=api_key,
+        api="responses" if kind == "openai-responses" else "chat",
+    )
 
 
 def resolve_model(model: str):

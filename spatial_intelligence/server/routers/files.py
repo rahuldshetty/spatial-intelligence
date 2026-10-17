@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ...contracts.errors import WorkspaceError
+from ...workspace import files as file_ops
 from ..deps import app_state
 
 router = APIRouter(tags=["files"])
@@ -30,8 +31,23 @@ class ImportUrl(BaseModel):
     filename: str | None = None
 
 
-class FilePath(BaseModel):
+class CheckUrl(BaseModel):
+    url: str
+
+
+class DeleteFile(BaseModel):
     path: str
+
+
+class RenameFile(BaseModel):
+    path: str
+    name: str
+
+
+@router.post("/api/import/check")
+def api_check_url(body: CheckUrl) -> dict:
+    """Check a URL from the server before a workspace is created."""
+    return file_ops.check_url(body.url)
 
 
 @router.api_route("/api/files/{rel_path:path}", methods=["GET", "HEAD"])
@@ -43,7 +59,7 @@ def api_workspace_file(rel_path: str) -> FileResponse:
     try:
         path = workspace.resolve(rel_path, must_exist=True)
     except WorkspaceError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not a file")
     return FileResponse(path, headers=FILE_CORS)
@@ -53,6 +69,18 @@ def api_workspace_file(rel_path: str) -> FileResponse:
 def api_workspace_file_preflight(rel_path: str) -> Response:
     """Answer the CORS preflight for a workspace file."""
     return Response(status_code=200, headers=FILE_CORS)
+
+
+@router.post("/api/files/delete")
+def api_delete_file(body: DeleteFile) -> dict:
+    """Delete one user file from the open workspace."""
+    return app_state().delete_file(body.path)
+
+
+@router.post("/api/files/rename")
+def api_rename_file(body: RenameFile) -> dict:
+    """Rename one user file within the open workspace."""
+    return app_state().rename_file(body.path, body.name)
 
 
 @router.post("/api/import/local")

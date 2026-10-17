@@ -6,11 +6,15 @@ survives a kernel restart and stays in sync with the workspace.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
+from shapely.geometry import shape
+
 from ...contracts.effects import Effect
 from ...contracts.errors import ToolInputError
+from ...contracts.services import MAP_BRIDGE_SERVICE
 from ...geo import raster
 from ...map import bridge
 from ...map import layers as layerops
@@ -55,6 +59,100 @@ class LayersPack:
         can be checked here instead of assumed.
         """
         return layerops.describe(self._map)
+
+    @tool(core=True, effects=frozenset({Effect.READ}))
+    def get_drawn_features(self, path: str = "results/drawn_aoi.geojson") -> dict:
+        """Read the AOI shapes the user drew with GeoLibre's GeoEditor.
+
+        Returns every point, line, and polygon as a GeoJSON FeatureCollection
+        summary with per-feature ``bbox`` and ``center``, and by default saves the
+        collection to ``path`` so clip, buffer, grid, segment_image, and the
+        vector tools can use it. The live browser must be open: the features are
+        read from the map, not from a workspace file.
+
+        Use each feature's ``bbox`` as a processing window. A point's bbox is
+        zero-area; buffer the saved point (or use the ``buffer`` tool) before
+        clipping or tiling around it. Pass ``path=""`` to skip saving.
+        """
+        broker = self._rt.services.get(MAP_BRIDGE_SERVICE)
+        if broker is None:
+            raise ToolInputError("the map query service is not available")
+        raw = broker.request(
+            "getDrawnFeatures", {}, workspace=self._rt.workspace.root.name
+        )
+        if isinstance(raw, dict) and isinstance(raw.get("features"), list):
+            raw = raw["features"]
+        if raw is None:
+            raw = []
+        if not isinstance(raw, list):
+            raise ToolInputError("the map returned an unexpected drawn-feature payload")
+
+        features: list[dict] = []
+        types: dict[str, int] = {}
+        union: list[float] | None = None
+        for index, item in enumerate(raw):
+            if not isinstance(item, dict) or not isinstance(item.get("geometry"), dict):
+                continue
+            try:
+                geometry = shape(item["geometry"])
+            except Exception as exc:  # noqa: BLE001 - a bad sketch is user input
+                raise ToolInputError(
+                    f"drawn feature {index + 1} has invalid geometry: {exc}"
+                ) from exc
+            if geometry.is_empty:
+                continue
+            bbox = [float(value) for value in geometry.bounds]
+            center = [float(geometry.centroid.x), float(geometry.centroid.y)]
+            properties = item.get("properties")
+            feature = {
+                "type": "Feature",
+                "id": item.get("id") or f"drawn-{index + 1}",
+                "properties": properties if isinstance(properties, dict) else {},
+                "geometry": item["geometry"],
+                "bbox": bbox,
+                "center": center,
+            }
+            features.append(feature)
+            kind = geometry.geom_type
+            types[kind] = types.get(kind, 0) + 1
+            union = (
+                bbox
+                if union is None
+                else [
+                    min(union[0], bbox[0]),
+                    min(union[1], bbox[1]),
+                    max(union[2], bbox[2]),
+                    max(union[3], bbox[3]),
+                ]
+            )
+
+        saved: str | None = None
+        if features and path:
+            if not path.lower().endswith((".geojson", ".json")):
+                raise ToolInputError("path must end in .geojson or .json")
+            destination = self._rt.workspace.resolve(path, write=True)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            collection = {"type": "FeatureCollection", "features": features}
+            destination.write_text(
+                json.dumps(collection, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self._rt.record_artifact(destination)
+            saved = self._rt.workspace.relative(destination)
+
+        return {
+            "count": len(features),
+            "geometry_types": types,
+            "bbox": union,
+            "features": features,
+            "path": saved,
+            "note": (
+                "No shapes were drawn with the map's GeoEditor."
+                if not features
+                else "Use each bbox as a processing window; buffer point features "
+                "before clipping or tiling."
+            ),
+        }
 
     @tool(core=True, effects=frozenset({Effect.READ}))
     def describe_geolibre_bridge(self) -> dict:

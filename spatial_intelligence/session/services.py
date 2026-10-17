@@ -15,16 +15,21 @@ from typing import Any
 from pydantic_ai_harness.compaction import DEFAULT_CONTEXT_WINDOW
 
 from ..agent.builder import BuiltAgent, build_agent
+from ..agent.vision import VisionService
 from ..ai.manager import MANAGER_SERVICE
 from ..contracts.errors import RuntimeNotBoundError
+from ..contracts.services import CAPTURE_SERVICE, MAP_BRIDGE_SERVICE, VISION_SERVICE
 from ..settings.env import server_base_url
 from ..tools.build import default_registry
+from ..tools.packs.vision import VisionPack
 from ..tools.registry import ToolRegistry
 from ..tools.runtime import RuntimeEvents, ToolRuntime
 from ..workspace import Workspace
 from ..workspace.files import read_limit_bytes
 from .bus import EventBus
+from .capture import CaptureBroker
 from .jobs import JobRegistry
+from .map_bridge import MapBridgeBroker
 
 #: Service-bag keys shared with the packs that provide or consume them.
 REGISTRY_SERVICE = "tools.registry"
@@ -76,6 +81,9 @@ class SessionServices:
         map_provider: Callable[[], dict],
         trace_length: Callable[[str], int] | None = None,
         base_url: str | None = None,
+        vision: VisionService | None = None,
+        capture: CaptureBroker | None = None,
+        map_bridge: MapBridgeBroker | None = None,
     ) -> None:
         self._bus = bus
         self._jobs = jobs
@@ -84,6 +92,9 @@ class SessionServices:
         self._map_provider = map_provider
         self._trace_length = trace_length
         self._base_url = base_url or server_base_url()
+        self._vision = vision
+        self._capture = capture
+        self._map_bridge = map_bridge
         self._registry: ToolRegistry | None = None
         self._runtime: ToolRuntime | None = None
         self._built: BuiltAgent | None = None
@@ -140,6 +151,12 @@ class SessionServices:
                 int(self._settings().get("context_window", 0) or 0) or DEFAULT_CONTEXT_WINDOW
             ),
         )
+        if self._vision is not None:
+            runtime.services[VISION_SERVICE] = self._vision
+        if self._capture is not None:
+            runtime.services[CAPTURE_SERVICE] = self._capture
+        if self._map_bridge is not None:
+            runtime.services[MAP_BRIDGE_SERVICE] = self._map_bridge
         registry = default_registry(runtime)
         # The capability pack reads the registry back out of the service bag, so
         # discovery can annotate the capabilities it advertises with each tool's
@@ -148,6 +165,9 @@ class SessionServices:
         self._registry = registry
         self._runtime = runtime
         self.rebuild_agent()
+        # A probe may have completed between the pack check above and this
+        # assignment; reconcile once the registry is visible to the callback.
+        self.sync_vision()
         return runtime
 
     def unbind(self) -> None:
@@ -174,6 +194,25 @@ class SessionServices:
             lambda: self._settings().get("model", ""),
             context_window=int(self._settings().get("context_window", 0) or 0),
         )
+
+    def sync_vision(self) -> None:
+        """Add or remove the image tool after a probe, then rebuild the agent.
+
+        The registry is authoritative for discovery too, so adding the pack here
+        is the only step needed to make ``analyze_image`` visible and callable.
+        """
+        registry = self._registry
+        if registry is None or self._runtime is None:
+            return
+        available = bool(self._vision is not None and self._vision.supported)
+        registered = "analyze_image" in registry
+        if available == registered:
+            return
+        if available:
+            registry.add_pack(VisionPack, self._runtime)
+        else:
+            registry.remove("analyze_image")
+        self.rebuild_agent()
 
     @contextmanager
     def run_scope(self, cell_id: str) -> Iterator[ToolRuntime]:
@@ -222,7 +261,11 @@ class SessionServices:
 
         executor = runtime.service(
             PYTHON_EXECUTOR_SERVICE,
-            lambda: PythonExecutor(runtime.workspace, approved=runtime.approved),
+            lambda: PythonExecutor(
+                runtime.workspace,
+                approved=runtime.approved,
+                services=runtime.services,
+            ),
         )
         executor.approved = runtime.approved
         return executor

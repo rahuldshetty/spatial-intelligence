@@ -29,6 +29,10 @@ def _port_in_use(port: int) -> bool:
 
 def run() -> None:
     """Validate configuration, ensure assets, and serve the app."""
+    # The normal entry point probes the configured model for image support so
+    # the status bar and tool surface reflect reality. Test harnesses import the
+    # app without this flag and stay off the network.
+    os.environ.setdefault("GEOAI_VISION_PROBE", "1")
     from ..settings.env import validate_env
     from .assets import ensure_frontend_assets
 

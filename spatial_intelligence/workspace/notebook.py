@@ -25,15 +25,10 @@ _NBFORMAT_MINOR = 5
 def new_cell(
     kind: str,
     source: str = "",
-    index: int | None = None,
     *,
     metadata: dict | None = None,
 ) -> dict:
-    """Return a fresh cell dict (uuid4 id, status "idle").
-
-    ``index`` is applied by the caller (``state.add_cell``); it is accepted here
-    only for API parity and is otherwise unused.
-    """
+    """Return a fresh cell dict (uuid4 id, status "idle")."""
     if kind not in VALID_KINDS:
         raise ValueError(f"invalid cell kind: {kind!r}")
     return {

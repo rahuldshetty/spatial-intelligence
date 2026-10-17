@@ -1,75 +1,173 @@
-/* spatial_intelligence — Data tab: import rows, headings, file tree. */
+/* spatial_intelligence — Data tab: import rows, drop zone, file tree. */
 
 /* -- data tab ------------------------------------------------------------- */
 
+.data-tab {
+  min-height: 100%;
+}
+
 .import-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 7px;
+  margin-bottom: 8px;
 }
 
 .import-row input[type="text"],
 .import-row input[type="url"] {
   flex: 1;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 13px;
   color: var(--text);
   background: var(--surface);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.import-row input::placeholder {
+  color: var(--text-3);
 }
 
 .import-row input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .import-row button {
-  padding: 8px 14px;
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 11px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: #fff;
-  background: var(--primary);
-  border: none;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 120ms ease;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.import-row button .icon {
+  color: var(--text-3);
 }
 
 .import-row button:hover {
-  background: var(--primary-hover);
+  color: var(--text);
+  background: var(--surface-3);
+  border-color: var(--border-strong);
 }
 
 .data-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   margin: 0 0 10px;
+}
+
+.data-heading-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .data-heading-label {
   color: var(--text);
   font-size: 13px;
+  font-weight: 700;
+}
+
+.data-count {
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.data-note {
+  margin: -2px 0 10px;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .data-refresh {
-  width: 26px;
-  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-2);
   cursor: pointer;
-  font-size: 17px;
-  line-height: 1;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
 .data-refresh:hover {
   background: var(--surface-3);
   color: var(--primary);
+  border-color: var(--primary-border);
 }
+
+/* -- drop zone ------------------------------------------------------------ */
+
+.drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 2px 0 12px;
+  padding: 16px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.drop-zone .icon {
+  color: var(--text-3);
+}
+
+.drop-zone strong {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.drop-zone:hover {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--text-2);
+}
+
+.drop-zone:hover .icon,
+.drop-zone:hover strong {
+  color: var(--primary);
+}
+
+.data-tab.drop-active .drop-zone {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+
+.data-tab.drop-active .drop-zone .icon,
+.data-tab.drop-active .drop-zone strong {
+  color: var(--primary);
+}
+
+/* -- file tree ------------------------------------------------------------ */
 
 .file-tree {
   list-style: none;
@@ -79,13 +177,13 @@
 }
 
 .file-tree .file-tree {
-  padding-left: 16px;
+  padding-left: 18px;
 }
 
 .tree-dir > details > summary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   padding: 4px 6px;
   cursor: pointer;
   list-style: none;
@@ -100,16 +198,37 @@
   display: none;
 }
 
-.tree-dir > details > summary::before {
-  content: "▸";
-  font-size: 10px;
+.tree-chevron {
   color: var(--text-3);
-  width: 12px;
   transition: transform 120ms ease;
 }
 
-.tree-dir > details[open] > summary::before {
+.tree-dir > details[open] > summary .tree-chevron {
   transform: rotate(90deg);
+}
+
+.tree-icon {
+  color: var(--text-3);
+}
+
+.tree-icon.kind-folder {
+  color: var(--primary);
+}
+
+.tree-icon.kind-raster {
+  color: var(--accent);
+}
+
+.tree-icon.kind-vector {
+  color: var(--primary);
+}
+
+.tree-icon.kind-table {
+  color: var(--success);
+}
+
+.tree-icon.kind-doc {
+  color: var(--text-3);
 }
 
 .tree-name {
@@ -124,9 +243,66 @@
 }
 
 .tree-file {
-  padding: 4px 6px 4px 18px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px 4px 17px;
+  border-radius: var(--radius-sm);
+}
+
+.tree-file:hover {
+  background: var(--surface-2);
 }
 
 .tree-file .tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.tree-file:hover .tree-actions,
+.tree-file:focus-within .tree-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .tree-actions {
+    opacity: 1;
+  }
+}
+
+.tree-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.tree-action:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tree-action[title^="Delete"]:hover {
+  background: var(--error-soft);
+  color: var(--error);
 }

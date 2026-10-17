@@ -2,17 +2,28 @@
 
 "use strict";
 
-import { getState } from "./api.js";
+import {
+  getState,
+  runAll,
+  runCell,
+  saveWorkspace,
+  sendMapBridge,
+  sendMapCapture,
+} from "./api.js";
+import { bridgeRequest } from "./bridge.js";
 import { closeAllMenus } from "./components/menubar.js";
 import { revealInteraction } from "./components/interaction.js";
 import { updateJobNode } from "./components/progress.js";
-import { refreshStatusBar } from "./components/status-bar.js";
+import { refreshStatusBar, setConnection } from "./components/status-bar.js";
+import { openSettingsDialog } from "./components/settings-dialog.js";
+import { closeDialog, toast } from "./dom.js";
 import { applyTrace, flushPendingTrace, repaintTrace } from "./components/trace.js";
 import { connectEvents } from "./events.js";
 import { renderCellsOnly } from "./pages/cells.js";
 import { renderDataOnly } from "./pages/data.js";
 import { mountShell, renderShell } from "./pages/shell.js";
 import { syncMap } from "./pages/map.js";
+import { jump } from "./scroll.js";
 import { applySnapshot, isGeneratedCell, normalizeCells, setFiles, setState, state, subscribe, upsertJob } from "./store.js";
 
 export function boot() {
@@ -21,16 +32,61 @@ export function boot() {
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".menu")) closeAllMenus();
   });
+  document.addEventListener("keydown", handleShortcut);
   connectEvents({
     onCell: handleCell,
+    onCellDeleted: handleCellDeleted,
     onTrace: handleTrace,
     onJob: handleJob,
     onJobs: handleJobs,
     onMap: handleMap,
     onFiles: handleFiles,
     onSettings: handleSettings,
+    onVision: handleVision,
+    onRunning: handleRunning,
+    onMapCapture: handleMapCapture,
+    onMapBridge: handleMapBridge,
+    onStatus: setConnection,
   });
   loadState();
+}
+
+function handleShortcut(event) {
+  if (event.key === "Escape") {
+    closeAllMenus();
+    closeDialog();
+    return;
+  }
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const key = event.key.toLowerCase();
+  if (key === "s") {
+    event.preventDefault();
+    if (!state.active_workspace) {
+      toast("No workspace open", "warning");
+      return;
+    }
+    saveWorkspace()
+      .then(() => toast("Workspace saved", "success"))
+      .catch((error) => toast(error.message || String(error), "error"));
+  } else if (event.key === ",") {
+    event.preventDefault();
+    openSettingsDialog();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    if (event.shiftKey) {
+      runAll()
+        .then(jump)
+        .catch((error) => toast(error.message || String(error), "error"));
+      return;
+    }
+    const cell = document.activeElement && document.activeElement.closest(".cell");
+    const cellId = cell && cell.getAttribute("data-cell-id");
+    if (cellId) {
+      runCell(cellId)
+        .then(jump)
+        .catch((error) => toast(error.message || String(error), "error"));
+    }
+  }
 }
 
 async function loadState() {
@@ -60,9 +116,85 @@ function handleCell(cell) {
   }
 }
 
+function handleCellDeleted(data) {
+  const cellId = data && data.id;
+  if (!cellId) return;
+  const cells = state.cells.filter((cell) => cell.id !== cellId);
+  if (cells.length === state.cells.length) return;
+  const jobs = (state.jobs || []).filter((job) => job.parent_id !== cellId);
+  setState({ cells, jobs });
+}
+
 function handleTrace(data) {
   if (!data) return;
   applyTrace(data);
+}
+
+function handleVision(data) {
+  if (!data) return;
+  state.vision = data;
+  refreshStatusBar();
+}
+
+function handleRunning(data) {
+  state.running_cell = (data && data.cell_id) || null;
+  refreshStatusBar();
+}
+
+/** Map queries the app is allowed to answer for the server. */
+const MAP_QUERY_METHODS = new Set(["getDrawnFeatures"]);
+
+/** Answer a server JSON map query with the live map's data. */
+async function handleMapBridge(data) {
+  if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  try {
+    if (
+      data.workspace &&
+      state.active_workspace &&
+      data.workspace !== state.active_workspace
+    ) {
+      throw new Error("The workspace changed before the map query ran.");
+    }
+    if (!MAP_QUERY_METHODS.has(data.method)) {
+      throw new Error("Unsupported map query: " + String(data.method));
+    }
+    const result = await bridgeRequest(data.method, data.params || {});
+    await sendMapBridge(data.id, data.token, result);
+  } catch (error) {
+    await sendMapBridge(
+      data.id,
+      data.token,
+      null,
+      error && error.message ? error.message : String(error)
+    ).catch(() => {});
+  }
+}
+
+/** Answer a server capture request with the current map canvas. */
+async function handleMapCapture(data) {
+  if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  try {
+    if (
+      data.workspace &&
+      state.active_workspace &&
+      data.workspace !== state.active_workspace
+    ) {
+      throw new Error("The workspace changed before the map was captured.");
+    }
+    const [image, view] = await Promise.all([
+      bridgeRequest("toImage", {}),
+      bridgeRequest("getView", {}),
+    ]);
+    await sendMapCapture(data.id, data.token, image, view);
+  } catch (error) {
+    await sendMapCapture(
+      data.id,
+      data.token,
+      null,
+      null,
+      error && error.message ? error.message : String(error)
+    ).catch(() => {});
+  }
 }
 
 function handleJob(event) {

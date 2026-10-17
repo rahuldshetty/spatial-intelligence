@@ -11,7 +11,13 @@ import { setMapProject, reportBridge } from "../api.js";
 import { el } from "../dom.js";
 import { state } from "../store.js";
 
-const BRIDGE_METHODS = ["project.load", "project.request_state"];
+const BRIDGE_METHODS = [
+  "project.load",
+  "project.request_state",
+  "toImage",
+  "getView",
+  "getDrawnFeatures",
+];
 
 let panel = null;
 let iframe = null;
@@ -107,8 +113,13 @@ function attachBridge() {
       postProject();
     } else if (data.type === "geolibre:state") {
       lastRemoteProject = data.project;
-      // Persist app-initiated edits (pan/zoom/layer edits inside the iframe).
-      if (data.project) setMapProject(data.project).catch(() => {});
+      // Track app-initiated edits (pan/zoom/layer edits) in the local project
+      // too. Otherwise the next shell render posts the stale project back and
+      // snaps the map to its previous view.
+      if (data.project) {
+        state.map_project = data.project;
+        setMapProject(data.project).catch(() => {});
+      }
     } else if (data.type === "geolibre:error") {
       const error = document.getElementById("map-error");
       if (error) {

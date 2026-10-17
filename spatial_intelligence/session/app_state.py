@@ -17,6 +17,7 @@ from .. import workflows
 from ..agent import verdict
 from ..agent.model import validate_model
 from ..agent.runner import PromptRunner, RunnerHooks
+from ..agent.vision import VisionService
 from ..ai import profiles
 from ..contracts.errors import ToolInputError
 from ..map.bridge import reset_bridge
@@ -25,22 +26,25 @@ from ..settings.env import DEFAULT_MODEL, list_workspaces, workspace_root
 from ..tools.runtime import ToolRuntime, bind
 from ..workflows import library
 from .bus import EventBus
+from .capture import CaptureBroker
 from .jobs import JobRegistry
+from .map_bridge import MapBridgeBroker
 from .notebook_session import RUNNABLE_KINDS, NotebookSession
 from .runs import RunQueue
 from .services import SessionServices
 from .workspace_session import WorkspaceSession
 
-#: Settings a PUT may patch.
-PATCHABLE_SETTINGS = frozenset(
-    {"model", "theme", "dangerous_mode", "max_retries", "record_agent_steps"}
-)
-
 
 class AppState:
     """Single-owner state for the running server."""
 
-    def __init__(self, *, settings: dict | None = None, worker: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        settings: dict | None = None,
+        worker: bool = True,
+        probe_vision: bool = False,
+    ) -> None:
         self.lock = threading.RLock()
         self.settings = settings or prefs.load_settings()
         self.bus = EventBus()
@@ -48,6 +52,13 @@ class AppState:
         self.runs = RunQueue()
         self.notebook = NotebookSession()
         self.workspaces = WorkspaceSession()
+        self.capture = CaptureBroker(self.bus)
+        self.map_bridge = MapBridgeBroker(self.bus)
+        self.vision = VisionService(
+            self.settings.get("model", DEFAULT_MODEL),
+            on_change=self._vision_changed,
+            enabled=probe_vision,
+        )
         self.services = SessionServices(
             bus=self.bus,
             jobs=self.jobs,
@@ -55,10 +66,15 @@ class AppState:
             files_provider=lambda: self.list_files(),
             map_provider=lambda: self.workspaces.project(),
             trace_length=self._trace_length,
+            vision=self.vision,
+            capture=self.capture,
+            map_bridge=self.map_bridge,
         )
         self._worker: threading.Thread | None = None
         if worker:
             self._start_worker()
+        if probe_vision:
+            self.vision.start()
 
     # -- snapshot --------------------------------------------------------
 
@@ -73,7 +89,9 @@ class AppState:
                 "map_app_url": self.workspaces.map._app_url,
                 "files": self.list_files(),
                 "jobs": self.jobs.snapshot(),
+                "running_cell": self.runs.active_id(),
                 "settings": dict(self.settings),
+                "vision": self.vision.snapshot(),
             }
 
     def subscribe(self):
@@ -83,6 +101,39 @@ class AppState:
     def unsubscribe(self, subscriber) -> None:
         """Deregister an SSE subscriber."""
         self.bus.unsubscribe(subscriber)
+
+    def complete_capture(
+        self,
+        capture_id: str,
+        token: str,
+        *,
+        image: str | None = None,
+        view: dict | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """Resolve a browser capture request (see ``CaptureBroker``)."""
+        return self.capture.complete(
+            capture_id, token, image=image, view=view, error=error
+        )
+
+    def complete_map_bridge(
+        self,
+        request_id: str,
+        token: str,
+        *,
+        result: object = None,
+        error: str | None = None,
+    ) -> bool:
+        """Resolve a JSON map query (see ``MapBridgeBroker``)."""
+        return self.map_bridge.complete(request_id, token, result=result, error=error)
+
+    def _vision_changed(self) -> None:
+        """Publish a probe result and add/remove the image tool accordingly."""
+        with self.lock:
+            if self.services.bound:
+                self.services.sync_vision()
+            snapshot = self.vision.snapshot()
+        self.bus.publish("vision", snapshot)
 
     # -- settings --------------------------------------------------------
 
@@ -116,8 +167,11 @@ class AppState:
                 if model_changed:
                     validate_model(self.settings["model"])
                 self.settings = prefs.save_settings(self.settings)
+                if model_changed:
+                    self.vision.reconfigure(self.settings["model"])
                 if model_changed and self.services.bound:
                     self.services.rebuild_agent()
+                    self.services.sync_vision()
             except Exception as exc:  # roll back and surface
                 self.settings["model"] = previous_model
                 self.settings = prefs.save_settings(self.settings)
@@ -138,6 +192,8 @@ class AppState:
         # app as disconnected for the rest of the session.
         if name != self.workspaces.name:
             reset_bridge()
+            self.capture.cancel_all("the workspace changed during the capture")
+            self.map_bridge.cancel_all("the workspace changed during the query")
         with self.lock:
             workspace = self.workspaces.open(name)
             self.notebook.load(workspace)
@@ -189,23 +245,6 @@ class AppState:
             raise
         return self.snapshot()
 
-    def apply_workflow(self, workflow_id: str, params: dict) -> dict:
-        """Seed a workflow's answers into the open workspace as its cells.
-
-        The workflow only decides which cells exist and what the prompt says:
-        running it is still an ordinary prompt cell, so the agent, the run
-        queue, traces, and progress are untouched.
-        """
-        with self.lock:
-            workspace = self.workspaces.workspace
-            if workspace is None:
-                raise ToolInputError("open a workspace before adding a workflow")
-            spec = workflows.get(workflow_id)
-            workflows.seed(
-                workspace, self.notebook, spec, params, verdict=self._model_verdict
-            )
-            return self.snapshot()
-
     def model_profile(self, model_ref: str, task: str = "") -> dict:
         """Describe one candidate model, for the wizard's up-front check."""
         profile = profiles.resolve(
@@ -226,6 +265,8 @@ class AppState:
         """Close the open workspace and reset the map and notebook."""
         self.runs.wait_idle()
         reset_bridge()
+        self.capture.cancel_all("the workspace was closed")
+        self.map_bridge.cancel_all("the workspace was closed")
         with self.lock:
             self.workspaces.close()
             self.notebook.close()
@@ -261,10 +302,18 @@ class AppState:
             return self.snapshot()
 
     def delete_cell(self, cell_id: str) -> dict:
-        """Delete a cell, its provenance, its traces, and its progress jobs."""
+        """Delete a cell, its provenance, its traces, and its progress jobs.
+
+        Idempotent: a stale tab that deletes the same cell twice gets the current
+        snapshot instead of a 404. Every deletion is broadcast so other tabs drop
+        the row without waiting for a reload.
+        """
         with self.lock:
+            if self.notebook.find_or_none(cell_id) is None:
+                return self.snapshot()
             self.notebook.delete(cell_id)
             self.jobs.clear_parent(cell_id)
+            self.bus.publish("cell_deleted", {"id": cell_id})
             return self.snapshot()
 
     def move_cell(self, cell_id: str, index: int) -> dict:
@@ -320,6 +369,7 @@ class AppState:
 
     def cancel_interaction(self, cell_id: str, interaction_id: str) -> None:
         """Stop a prompt that is paused for input."""
+        self.runs.stop(cell_id)
         with self.lock:
             cell = self.notebook.cancel_interaction(cell_id, interaction_id)
             self.bus.publish("cell", cell)
@@ -349,12 +399,51 @@ class AppState:
             workspace = self._require_workspace()
             name = filename or filename_from_url(url)
             job = self.jobs.reporter().job("download", name, unit="bytes")
-            with job:
-                path = download_file(workspace, url, name, job=job)
-                relative = workspace.relative(path)
-                job.done(artifact=relative)
+        # The network transfer must not hold the session lock: a slow download
+        # would otherwise block /api/state and every other request for its whole
+        # duration (and make a URL served by this same app deadlock).
+        with job:
+            path = download_file(workspace, url, name, job=job)
+            relative = workspace.relative(path)
+            job.done(artifact=relative)
+        with self.lock:
             self.bus.publish("files", {"files": self.list_files()})
             return {"path": relative}
+
+    def delete_file(self, path: str) -> dict:
+        """Delete a user file and drop any map layer that served it."""
+        from ..map.layers import remove_local_sources
+        from ..workspace import files as fileops
+
+        with self.lock:
+            workspace = self._require_workspace()
+            relative = fileops.delete_file(workspace, path)
+            removed = remove_local_sources(self.workspaces.map, workspace, relative)
+            if removed:
+                self.workspaces.save_map()
+                self.bus.publish("map", {"project": self.workspaces.project()})
+            self.bus.publish("files", {"files": self.list_files()})
+            return self.snapshot()
+
+    def rename_file(self, path: str, name: str) -> dict:
+        """Rename a user file and re-point the layers that served it."""
+        from ..map.layers import rename_local_sources
+        from ..workspace import files as fileops
+
+        with self.lock:
+            workspace = self._require_workspace()
+            old_rel, new_rel = fileops.rename_file(workspace, path, name)
+            changed = 0
+            runtime = self.services.runtime
+            if runtime is not None and old_rel != new_rel:
+                changed = rename_local_sources(
+                    self.workspaces.map, workspace, old_rel, new_rel, runtime.file_url
+                )
+            if changed:
+                self.workspaces.save_map()
+                self.bus.publish("map", {"project": self.workspaces.project()})
+            self.bus.publish("files", {"files": self.list_files()})
+            return self.snapshot()
 
     def list_files(self) -> list[str]:
         """List workspace files."""
@@ -422,6 +511,8 @@ class AppState:
             source = cell["source"]
             # Every execution attempt counts, including a resumed one.
             cell["execution_count"] = (cell.get("execution_count") or 0) + 1
+        if kind == "prompt":
+            self.bus.publish("running", {"cell_id": cell_id})
         try:
             with self.services.run_scope(cell_id) as runtime:
                 if kind == "python":
@@ -429,6 +520,8 @@ class AppState:
                 else:
                     self._execute_prompt(cell_id, source, token, resume, runtime)
         finally:
+            if kind == "prompt":
+                self.bus.publish("running", {"cell_id": None})
             with self.lock:
                 cell = self.notebook.find_or_none(cell_id)
                 if cell is not None:

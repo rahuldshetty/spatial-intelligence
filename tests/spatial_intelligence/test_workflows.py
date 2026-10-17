@@ -251,6 +251,40 @@ class PromptTests(unittest.TestCase):
         self.assertIn("water bodies", text)
         self.assertIn(resolve.AOI_PATH, text)
 
+    def test_details_inputs_are_optional(self):
+        params = {"aoi": {"mode": "bbox", "bbox": "75.80,30.88,75.92,30.96"}}
+
+        text = resolve.prompt_text(workflows.get("change-detection"), params)
+
+        self.assertIn("Analysis goal: none", text)
+        self.assertNotIn("Earlier input", text)
+        self.assertNotIn("Later input", text)
+
+    def test_a_multiline_goal_keeps_its_lines(self):
+        params = {**SEGMENT_PARAMS, "notes": "Find water.\nUse NDWI above 0.2."}
+
+        text = resolve.prompt_text(workflows.get("segmentation"), params)
+
+        self.assertIn("Analysis goal: Find water.\nUse NDWI above 0.2.", text)
+
+    def test_attached_files_and_their_notes_reach_the_prompt_and_the_record(self):
+        params = {
+            **SEGMENT_PARAMS,
+            "attachments": [
+                {"path": "data/roads.geojson", "description": "Roads clipped to the AOI"},
+                {"path": "data/fields.zip", "description": ""},
+            ],
+        }
+
+        text = resolve.prompt_text(workflows.get("segmentation"), params)
+        record = resolve.markdown_record(workflows.get("segmentation"), params)
+
+        self.assertIn("Attached inputs", text)
+        self.assertIn("data/roads.geojson — Roads clipped to the AOI", text)
+        self.assertIn("data/fields.zip", text)
+        self.assertIn("data/roads.geojson", record)
+        self.assertIn("Roads clipped to the AOI", record)
+
     def test_the_model_block_carries_what_the_user_asked_for(self):
         text = resolve.prompt_text(workflows.get("segmentation"), SEGMENT_PARAMS)
 
@@ -363,7 +397,7 @@ class PromptTests(unittest.TestCase):
         text = resolve.prompt_text(workflows.get("segmentation"), SEGMENT_PARAMS)
 
         self.assertIn("Input data: none", text)
-        self.assertIn("Extra instructions: none", text)
+        self.assertIn("Analysis goal: none", text)
 
     def test_a_missing_required_answer_is_refused(self):
         params = dict(SEGMENT_PARAMS)
@@ -466,6 +500,24 @@ class SeedTests(unittest.TestCase):
         self.assertIn("slimsam-77", record["answers"]["model"])
         self.assertEqual(record["aoi"]["mode"], "bbox")
         self.assertIn("75.8, 30.88, 75.92, 30.96", prompt_cell["source"])
+
+    def test_seeding_keeps_attached_file_notes(self):
+        params = {
+            **SEGMENT_PARAMS,
+            "attachments": [
+                {"path": "data/roads.geojson", "description": "Roads clipped to the AOI"}
+            ],
+        }
+
+        cells = resolve.seed(
+            self.workspace, self.notebook, workflows.get("segmentation"), dict(params)
+        )
+
+        self.assertIn("Attached inputs", cells[1]["source"])
+        self.assertIn("data/roads.geojson", cells[1]["source"])
+        self.assertIn("Roads clipped to the AOI", cells[1]["source"])
+        workflow = cells[1]["metadata"]["geoai"]["workflow"]
+        self.assertEqual(workflow["attachments"][0]["path"], "data/roads.geojson")
 
     def test_a_drawn_area_of_interest_is_written_where_the_prompt_says(self):
         params = dict(SEGMENT_PARAMS, aoi={"mode": "drawn", "geojson": DRAWN})

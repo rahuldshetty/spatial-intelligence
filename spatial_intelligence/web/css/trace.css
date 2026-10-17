@@ -25,10 +25,6 @@
   border-left: 3px solid var(--primary);
 }
 
-.trace-step.tool-result {
-  border-left: 3px solid var(--accent);
-}
-
 .download-trace {
   border-left: 3px solid var(--primary);
 }
@@ -55,6 +51,10 @@
 }
 
 .trace-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
   font-size: 12px;
   color: var(--text-3);
   flex-shrink: 0;
@@ -105,6 +105,100 @@
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--text);
+}
+
+/* Finished prompts keep only the input and final answer in view. */
+.trace-details {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.trace-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.trace-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.trace-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.trace-view:hover {
+  color: var(--text);
+  background: var(--surface-3);
+  border-color: var(--border);
+}
+
+.trace-details[open] > summary {
+  color: var(--text);
+}
+
+.trace-details .trace-toggle-icon {
+  transition: transform 120ms ease;
+}
+
+.trace-details[open] .trace-toggle-icon {
+  transform: rotate(90deg);
+}
+
+.trace-details > .trace {
+  border-top: 1px solid var(--border);
+}
+
+.trace-text-body {
+  position: relative;
+}
+
+.trace-step.trace-text.collapsed .trace-text-body {
+  max-height: 250px;
+  overflow: hidden;
+}
+
+.trace-step.trace-text.collapsed .trace-text-body::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 42px;
+  background: linear-gradient(transparent, var(--surface-2));
+  pointer-events: none;
+}
+
+.trace-more {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.trace-more:hover {
+  text-decoration: underline;
 }
 .trace-step.trace-plan {
   border-left: 3px solid var(--warn);
@@ -181,10 +275,16 @@
 }
 
 .plan-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   width: 14px;
-  text-align: center;
   font-size: 11px;
+}
+
+.plan-mark-in_progress svg {
+  animation: trace-spin 1s linear infinite;
 }
 
 .plan-item.plan-completed .plan-item-icon { color: var(--success); }

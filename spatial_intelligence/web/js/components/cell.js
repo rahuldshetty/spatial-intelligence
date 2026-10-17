@@ -1,17 +1,20 @@
 /* One cell: header actions, source, output, trace, and its job strip. */
 
-import { el, expandableContent, toast, usageLabel, usageTitle } from "../dom.js";
-import { deleteCell, moveCell, runCell, stopCell, updateCell } from "../api.js";
+import { confirmDialog, el, expandableContent, toast, usageLabel, usageTitle } from "../dom.js";
+import { moveCell, runCell, stopCell, updateCell } from "../api.js";
+import { icon } from "../icons.js";
 import { state } from "../store.js";
 import { cellOutputText, renderMarkdown } from "./markdown.js";
 import { renderTrace } from "./trace.js";
-import { editMarkdown } from "../pages/cells.js";
+import { jump } from "../scroll.js";
+import { editMarkdown, isCellDeleted, removeCell } from "../pages/cells.js";
+import { openTraceModal } from "./trace-modal.js";
 
 /** Fire a cell action, surfacing its failure the way the old app did. */
 function act(action) {
   Promise.resolve()
     .then(action)
-    .catch((error) => toast(error.message || String(error)));
+    .catch((error) => toast(error.message || String(error), "error"));
 }
 
 function cellBadge(kind, geoai) {
@@ -31,38 +34,64 @@ function cellStatusText(status) {
   return "";
 }
 
+function confirmDeleteCell(cell) {
+  confirmDialog({
+    title: "Delete this cell?",
+    message:
+      "The cell and its recorded steps will be removed. This cannot be undone.",
+    confirmLabel: "Delete",
+    danger: true,
+    onConfirm: () => removeCell(cell.id),
+  });
+}
+
+function headButton(name, title, onclick, className = "icon") {
+  const button = el("button", {
+    class: className,
+    type: "button",
+    title,
+    "aria-label": title,
+    onclick,
+  });
+  button.append(icon(name, { size: 14 }));
+  return button;
+}
+
 function renderHeader(cell, kind, geoai, generated) {
   const header = el("div", { class: "cell-header" });
   if (kind !== "markdown" && kind !== "tool" && cell.status !== "waiting_for_input") {
     if (cell.status === "running" && kind === "prompt") {
       header.append(
-        el("button", {
-          class: "run-btn stop",
-          text: "■",
-          title: "Stop",
-          onclick: () => act(() => stopCell(cell.id)),
-        })
+        headButton("stop", "Stop", () => act(() => stopCell(cell.id)), "run-btn stop")
       );
     } else {
       header.append(
-        el("button", {
-          class: "run-btn",
-          text: "▶",
-          title: "Run",
-          onclick: () => act(() => runCell(cell.id)),
-        })
+        headButton(
+          "play",
+          "Run",
+          () =>
+            act(async () => {
+              await runCell(cell.id);
+              jump();
+            }),
+          "run-btn"
+        )
       );
     }
+  } else {
+    // Keep the header's leading gutter stable across cell kinds and states.
+    header.append(el("span", { class: "run-slot" }));
   }
   header.append(
     el("span", {
       class: "counter",
       text: "In[" + (cell.execution_count != null ? cell.execution_count : " ") + "]",
     }),
-    el("span", { class: "badge", text: cellBadge(kind, geoai) })
+    el("span", { class: "badge badge-" + kind, text: cellBadge(kind, geoai) })
   );
   if (kind === "tool") {
     header.append(
+      icon("wrench", { size: 13, class: "tool-icon" }),
       el("span", { class: "agent-action-name", text: geoai.tool_name || "tool" }),
       el("span", {
         class: "agent-action-status status-" + (cell.status || "idle"),
@@ -72,54 +101,24 @@ function renderHeader(cell, kind, geoai, generated) {
   }
   header.append(el("span", { class: "spacer" }));
 
+  const actions = el("div", { class: "cell-actions" });
   if (kind === "markdown") {
     if (!generated) {
-      header.append(
-        el("button", {
-          class: "icon",
-          text: "edit",
-          title: "Edit",
-          onclick: () => editMarkdown(cell),
-        }),
-        el("button", {
-          class: "icon",
-          text: "✕",
-          title: "Delete",
-          onclick: () => act(() => deleteCell(cell.id)),
-        })
+      actions.append(
+        headButton("pencil", "Edit", () => editMarkdown(cell)),
+        headButton("trash-2", "Delete", () => confirmDeleteCell(cell))
       );
     }
   } else if (kind === "tool") {
-    header.append(
-      el("button", {
-        class: "icon",
-        text: "✕",
-        title: "Delete",
-        onclick: () => deleteCell(cell.id),
-      })
-    );
+    actions.append(headButton("trash-2", "Delete", () => confirmDeleteCell(cell)));
   } else {
-    header.append(
-      el("button", {
-        class: "icon",
-        text: "↑",
-        title: "Move up",
-        onclick: () => act(() => moveCell(cell.id, -1)),
-      }),
-      el("button", {
-        class: "icon",
-        text: "↓",
-        title: "Move down",
-        onclick: () => act(() => moveCell(cell.id, 1)),
-      }),
-      el("button", {
-        class: "icon",
-        text: "✕",
-        title: "Delete",
-        onclick: () => deleteCell(cell.id),
-      })
+    actions.append(
+      headButton("chevron-up", "Move up", () => act(() => moveCell(cell.id, -1))),
+      headButton("chevron-down", "Move down", () => act(() => moveCell(cell.id, 1))),
+      headButton("trash-2", "Delete", () => confirmDeleteCell(cell))
     );
   }
+  header.append(actions);
   return header;
 }
 
@@ -136,6 +135,7 @@ function renderBody(cell, kind, geoai, source, generated) {
   } else {
     const ta = el("textarea", {
       rows: Math.min(12, Math.max(2, source.split("\n").length)),
+      spellcheck: "false",
     });
     ta.value = source;
     if (generated) {
@@ -144,14 +144,34 @@ function renderBody(cell, kind, geoai, source, generated) {
       ta.addEventListener("input", () => {
         const idx = state.cells.findIndex((c) => c.id === cell.id);
         if (idx >= 0) state.cells[idx].source = ta.value;
+        autoGrow(ta);
       });
-      ta.addEventListener("blur", () => {
+      ta.addEventListener("blur", (event) => {
+        if (isCellDeleted(cell.id)) return;
+        const target = event && event.relatedTarget;
+        if (
+          target &&
+          typeof target.closest === "function" &&
+          target.closest(".cell")?.getAttribute("data-cell-id") === cell.id &&
+          target.closest('button[title="Delete"]')
+        ) {
+          return;
+        }
         act(() => updateCell(cell.id, ta.value));
       });
     }
     body.append(ta);
+    window.requestAnimationFrame(() => autoGrow(ta));
   }
   return body;
+}
+
+/** Grow a textarea to its content, capped so one cell cannot own the panel. */
+function autoGrow(ta) {
+  if (!ta || !ta.style) return;
+  ta.style.height = "auto";
+  const height = Number(ta.scrollHeight) || 0;
+  if (height) ta.style.height = Math.min(height, 360) + "px";
 }
 
 function renderOutputRow(cell, kind) {
@@ -213,6 +233,9 @@ function renderToolOutput(cell) {
  * the cell's job strip whatever the cell kind, so a job parented to a python or
  * tool cell is visible instead of being dropped.
  */
+const expandedPromptTraces = new Set();
+const TERMINAL_STATUSES = new Set(["done", "stopped", "error"]);
+
 export function renderCell(cell, jobs = []) {
   const kind = cell.kind;
   const geoai = (cell.metadata && cell.metadata.geoai) || {};
@@ -233,6 +256,12 @@ export function renderCell(cell, jobs = []) {
     if (output) box.append(output);
   }
 
+  // The prompt's final answer comes before the folded intermediate steps.
+  if (kind !== "markdown" && kind !== "tool") {
+    const output = renderOutputBlock(cell);
+    if (output) box.append(output);
+  }
+
   const traceNodes = renderTrace(cell, jobs);
   // A prompt cell always mounts its trace container, even while it is empty:
   // live steps stream in before the first one is part of the cell snapshot, and
@@ -241,11 +270,45 @@ export function renderCell(cell, jobs = []) {
   if (kind === "prompt" || traceNodes.length) {
     const trace = el("div", { class: "trace" });
     trace.append(...traceNodes);
-    box.append(trace);
-  }
-
-  if (kind !== "markdown" && kind !== "tool") {
-    box.append(renderOutputBlock(cell));
+    if (
+      kind === "prompt" &&
+      traceNodes.length &&
+      TERMINAL_STATUSES.has(cell.status)
+    ) {
+      const details = el("details", {
+        class: "trace-details",
+        "data-trace-cell": cell.id,
+      });
+      if (expandedPromptTraces.has(cell.id)) details.setAttribute("open", "");
+      const summary = el("summary", { class: "trace-toggle" });
+      summary.append(
+        icon("chevron-right", { size: 13, class: "trace-toggle-icon" }),
+        el("span", {
+          text: "Intermediate steps (" + traceNodes.length + ")",
+        })
+      );
+      const view = el("button", {
+        type: "button",
+        class: "trace-view",
+        title: "Open full trace",
+        "aria-label": "Open full trace",
+      });
+      view.append(icon("eye", { size: 13 }), el("span", { text: "View" }));
+      view.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openTraceModal(cell);
+      });
+      summary.append(view);
+      details.append(summary, trace);
+      details.addEventListener("toggle", () => {
+        if (details.open) expandedPromptTraces.add(cell.id);
+        else expandedPromptTraces.delete(cell.id);
+      });
+      box.append(details);
+    } else {
+      box.append(trace);
+    }
   }
 
   return box;

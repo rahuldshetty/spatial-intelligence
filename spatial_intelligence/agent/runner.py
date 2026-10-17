@@ -24,6 +24,7 @@ from pydantic_ai import (
     UsageLimitExceeded,
     UsageLimits,
 )
+from pydantic_ai.messages import ModelResponse
 from pydantic_ai_harness.planning import InMemoryPlanStore, PlanItem
 
 from ..contracts.ids import new_id
@@ -61,6 +62,26 @@ CONTEXT_OVERFLOW_HINTS = (
     "input is too long",
     "prompt is too long",
 )
+
+
+def request_usage(messages: list) -> list[dict]:
+    """Return one usage row per model response in this run segment."""
+    rows: list[dict] = []
+    for message in messages:
+        if not isinstance(message, ModelResponse):
+            continue
+        row = traces.usage_to_dict(message.usage)
+        row["model"] = message.model_name
+        row["timestamp"] = getattr(message, "timestamp", None)
+        if hasattr(row["timestamp"], "isoformat"):
+            row["timestamp"] = row["timestamp"].isoformat()
+        row["tools"] = [
+            part.tool_name
+            for part in message.parts
+            if isinstance(getattr(part, "tool_name", None), str)
+        ]
+        rows.append(row)
+    return rows
 
 
 def is_transient_run_error(error: Exception) -> bool:
@@ -433,7 +454,11 @@ class PromptRunner:
                 conversation_id=result.conversation_id,
             )
 
-        usage_step = {"type": "usage", "usage": usage}
+        usage_step = {
+            "type": "usage",
+            "usage": usage,
+            "requests": request_usage(result.new_messages()),
+        }
         trace_steps.append(usage_step)
         hooks.publish_trace(cell_id, usage_step)
         if trace_path is not None:

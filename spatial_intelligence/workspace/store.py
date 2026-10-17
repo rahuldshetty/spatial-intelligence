@@ -114,6 +114,27 @@ class Workspace:
             manifest["version"] = int(manifest.get("version", 0)) + 1
             self._write_manifest(manifest)
 
+    def forget_output(self, rel: str) -> None:
+        """Drop ``rel`` from the manifest outputs and bump the version."""
+        with self._manifest_lock:
+            manifest = self._read_manifest()
+            outputs = [item for item in manifest.get("outputs", []) if item != rel]
+            manifest["outputs"] = outputs
+            manifest["version"] = int(manifest.get("version", 0)) + 1
+            self._write_manifest(manifest)
+
+    def move_output(self, old_rel: str, new_rel: str) -> None:
+        """Replace an output path after a rename and bump the version."""
+        with self._manifest_lock:
+            manifest = self._read_manifest()
+            outputs = [
+                new_rel if item == old_rel else item
+                for item in manifest.get("outputs", [])
+            ]
+            manifest["outputs"] = outputs
+            manifest["version"] = int(manifest.get("version", 0)) + 1
+            self._write_manifest(manifest)
+
     # -- convenience -----------------------------------------------------
 
     def list_files(self, subdir: str = "", pattern: str = "*") -> list[str]:

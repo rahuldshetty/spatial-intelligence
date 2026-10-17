@@ -23,7 +23,11 @@ class PythonPack:
         self._rt = runtime
         self.executor = runtime.service(
             "python.executor",
-            lambda: PythonExecutor(runtime.workspace, approved=runtime.approved),
+            lambda: PythonExecutor(
+                runtime.workspace,
+                approved=runtime.approved,
+                services=runtime.services,
+            ),
         )
 
     @tool(core=True, effects=frozenset({Effect.WORKSPACE_WRITE, Effect.PROCESS, Effect.NETWORK}))

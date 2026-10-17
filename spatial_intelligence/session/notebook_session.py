@@ -336,11 +336,15 @@ class NotebookSession:
         return cell, payload
 
     def cancel_interaction(self, cell_id: str, interaction_id: str) -> dict:
-        """Stop a cell that is paused for browser input."""
+        """Stop a cell that is paused for browser input.
+
+        Idempotent by design: a stale form (a reload, a lost interaction id) must
+        still stop the prompt. If the cell is no longer waiting, leave it alone
+        and return its current state; cancelling twice is not an error.
+        """
         cell = self.find(cell_id)
-        interaction = self.pending_interaction(cell_id)
-        if interaction.get("id") != interaction_id:
-            raise ToolInputError("interaction is no longer pending")
+        if cell.get("status") != "waiting_for_input":
+            return cell
         cell["status"] = "stopped"
         cell["interaction"] = None
         cell["outputs"] = [stream_output("Stopped while waiting for input.")]

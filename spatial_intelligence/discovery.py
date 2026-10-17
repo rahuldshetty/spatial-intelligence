@@ -60,6 +60,35 @@ CAPABILITIES: tuple[Capability, ...] = (
         ),
     ),
     Capability(
+        id="map.aoi",
+        title="User-drawn AOIs",
+        summary=(
+            "Read the points, lines, and polygons the user drew with GeoLibre's "
+            "GeoEditor, save them as GeoJSON, and get each feature's bounds for "
+            "clipping and tiling."
+        ),
+        keywords=(
+            "aoi", "area of interest", "drawn", "draw", "sketch", "point",
+            "polygon", "region", "boundary", "extent", "tile", "clip",
+        ),
+        implementation="backend using the live GeoLibre GeoEditor layers",
+        tools=("get_drawn_features",),
+    ),
+    Capability(
+        id="map.vision",
+        title="Look at the map or an image",
+        summary=(
+            "Send the current GeoLibre viewport or a workspace image/GeoTIFF to "
+            "a vision-capable model and answer a question about it."
+        ),
+        keywords=(
+            "image", "screenshot", "screen", "see", "look", "visual", "vision",
+            "viewport", "map", "draw", "box", "bounding", "describe", "photo",
+        ),
+        implementation="backend using the configured image-capable OpenAI endpoint",
+        tools=("analyze_image",),
+    ),
+    Capability(
         id="raster.processing",
         title="Raster processing",
         summary=(

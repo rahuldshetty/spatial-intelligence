@@ -15,7 +15,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 #: Field types the browser knows how to render.
-FieldType = Literal["radio", "multi_select", "text", "confirmation", "aoi", "model"]
+FieldType = Literal[
+    "radio", "multi_select", "text", "textarea", "confirmation", "aoi", "model"
+]
 
 
 class ChoiceOption(BaseModel):

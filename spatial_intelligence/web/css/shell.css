@@ -376,45 +376,32 @@ body.resizing #map-panel iframe {
 /* -- status bar ----------------------------------------------------------- */
 
 #status-bar {
+  container-type: inline-size;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 9px;
+  padding: 6px 12px;
   border-top: 1px solid var(--border);
   background: var(--surface-2);
   font-size: 12px;
-  min-height: 35px;
+  min-height: 34px;
   flex-shrink: 0;
 }
 
-.status-ws {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-weight: 600;
-  color: var(--text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.status-ws .icon {
-  color: var(--text-3);
-}
-
+/* Connection is colour only; the label lives in the hover tooltip. */
 .conn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  color: var(--text-3);
-  font-size: 11px;
-  white-space: nowrap;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  cursor: help;
 }
 
 .conn-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--text-3);
 }
@@ -422,10 +409,6 @@ body.resizing #map-panel iframe {
 .conn-live .conn-dot {
   background: var(--success);
   box-shadow: 0 0 0 3px var(--success-soft);
-}
-
-.conn-reconnecting {
-  color: var(--warn);
 }
 
 .conn-reconnecting .conn-dot {
@@ -437,22 +420,24 @@ body.resizing #map-panel iframe {
   50% { opacity: 0.35; }
 }
 
-/* Workspace name on the left; totals and the follow toggle pushed right. */
 .status-right {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
 .status-stats {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font-family: var(--font-mono);
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-3);
+  font-family: var(--font-mono);
   white-space: nowrap;
+  cursor: help;
 }
 
 .status-stats .stat {
@@ -460,7 +445,7 @@ body.resizing #map-panel iframe {
 }
 
 .status-stats .stat + .stat {
-  padding-left: 9px;
+  padding-left: 8px;
   border-left: 1px solid var(--border);
 }
 
@@ -469,17 +454,19 @@ body.resizing #map-panel iframe {
   font-weight: 600;
 }
 
+/* Compact switch; the words stay visible while there is room. */
 .follow-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 3px 7px 3px 6px;
+  gap: 6px;
+  padding: 2px 5px 2px 2px;
   border: 1px solid transparent;
   border-radius: 999px;
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
   color: var(--text-3);
+  flex: 0 0 auto;
   transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
@@ -499,8 +486,9 @@ body.resizing #map-panel iframe {
   appearance: none;
   -webkit-appearance: none;
   position: relative;
-  width: 27px;
-  height: 15px;
+  width: 26px;
+  height: 14px;
+  flex: 0 0 26px;
   margin: 0;
   border-radius: 999px;
   background: var(--border-strong);
@@ -513,8 +501,8 @@ body.resizing #map-panel iframe {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
@@ -527,6 +515,33 @@ body.resizing #map-panel iframe {
 
 .follow-toggle input:checked::after {
   transform: translateX(12px);
+}
+
+.follow-toggle input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.follow-label {
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* Drop the least critical items before the row can overflow. */
+@container (max-width: 415px) {
+  #status-bar .stat.cost {
+    display: none;
+  }
+}
+
+@container (max-width: 380px) {
+  #status-bar .follow-label {
+    display: none;
+  }
+
+  #status-bar .follow-toggle {
+    padding: 2px;
+  }
 }
 
 /* -- narrow windows ------------------------------------------------------- */
@@ -553,7 +568,4 @@ body.resizing #map-panel iframe {
     border-top: 1px solid var(--border);
   }
 
-  .status-stats .stat.cache {
-    display: none;
-  }
 }

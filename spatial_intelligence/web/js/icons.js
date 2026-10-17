@@ -85,6 +85,7 @@ const PATHS = {
     '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>' +
     '<path d="m7 10 5 5 5-5M12 15V3"/>',
   "arrow-right": '<path d="M4 12h16M14 6l6 6-6 6"/>',
+  "arrow-down-to-line": '<path d="M12 4v12M6 10l6 6 6-6M4 20h16"/>',
   wrench:
     '<path d="M14.7 6.3a4.5 4.5 0 0 0 6 6l-9.4 9.4a2.8 2.8 0 0 1-4-4z"/>' +
     '<path d="m5 5 3 3M3 8l3-3"/>',

@@ -1,9 +1,14 @@
-/* Status bar: active workspace, live-update state, and session token/cost totals. */
+/* Status bar: live-update state, session token/cost totals, and Follow output.
+
+The workspace name lives in the menubar chip, so it is not repeated here. The
+connection state is a coloured dot with a hover tooltip; request/cache details
+live in the token summary's tooltip, keeping the bar to one line in a narrow
+panel.
+*/
 
 import { el, formatCost, formatTokens } from "../dom.js";
-import { icon } from "../icons.js";
 import { followToggle } from "../scroll.js";
-import { state, usageTotals } from "../store.js";
+import { usageTotals } from "../store.js";
 
 let connection = "connecting";
 
@@ -27,36 +32,49 @@ function connectionNode() {
     role: "status",
   });
   node.append(el("span", { class: "conn-dot" }));
-  if (connection !== "live") {
-    node.append(el("span", { text: connection === "reconnecting" ? "Reconnecting" : "Connecting" }));
-  }
   return node;
+}
+
+function usageDetails(u) {
+  const rounded = u.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
+  const parts = [
+    u.requests + (u.requests === 1 ? " request" : " requests"),
+    rounded + "% cached",
+  ];
+  if (u.toolCalls) {
+    parts.push(u.toolCalls + (u.toolCalls === 1 ? " tool call" : " tool calls"));
+  }
+  return parts.join(" · ");
 }
 
 export function renderStatusBar() {
   const bar = el("div", { id: "status-bar" });
-  const active = state.active_workspace;
-  const ws = el("span", { class: "status-ws" });
-  ws.append(icon(active ? "folder" : "globe", { size: 13 }), el("span", { text: active || "No workspace" }));
-  bar.append(ws, connectionNode());
+  bar.append(connectionNode());
 
-  const right = el("div", { class: "status-right" });
   const u = usageTotals();
   if (u.has) {
-    const stats = el("div", { class: "status-stats" });
+    const stats = el("div", {
+      class: "status-stats",
+      title: usageDetails(u),
+      "aria-label": "Token usage: " + usageDetails(u),
+    });
+    const ratio = u.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
     stats.append(
-      el("span", { class: "stat", title: "Input tokens", text: "↑ " + formatTokens(u.input) }),
-      el("span", { class: "stat", title: "Output tokens", text: "↓ " + formatTokens(u.output) }),
-      el("span", { class: "stat", title: "Model requests", text: u.requests + " req" })
+      el("span", { class: "stat", text: "↑ " + formatTokens(u.input) }),
+      el("span", { class: "stat", text: "↓ " + formatTokens(u.output) }),
+      el("span", { class: "stat", title: "Model requests", text: u.requests + " req" }),
+      el("span", {
+        class: "stat cache",
+        title: "Prompt cache hit rate",
+        text: ratio + "% cache",
+      })
     );
     const cost = formatCost(u.cost);
     if (cost) stats.append(el("span", { class: "stat cost", text: cost }));
-    const ratio = u.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
-    stats.append(
-      el("span", { class: "stat", title: "Prompt cache hit ratio (DeepSeek)", text: ratio + "% cached" })
-    );
-    right.append(stats);
+    bar.append(stats);
   }
+
+  const right = el("div", { class: "status-right" });
   right.append(followToggle());
   bar.append(right);
   return bar;

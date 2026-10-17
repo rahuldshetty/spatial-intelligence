@@ -524,7 +524,7 @@ class FileTreeRenderingTests(WebRenderingTestCase):
 
 
 class StatusBarRenderingTests(WebRenderingTestCase):
-    def test_status_bar_reports_workspace_and_token_totals(self):
+    def test_status_bar_reports_compact_token_totals(self):
         rendered = self.run_module(
             module_url("components", "status-bar.js"),
             "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
@@ -533,31 +533,43 @@ class StatusBarRenderingTests(WebRenderingTestCase):
             "  input_tokens: 2000, output_tokens: 500, requests: 3,"
             "  cache_read_tokens: 1000, cost: 0.01 } }];"
             "const bar = mod.renderStatusBar();"
-            "return { id: bar.attributes.id, text: bar.textContent };",
+            "const stats = bar.querySelector('.status-stats');"
+            "return { id: bar.attributes.id, text: bar.textContent,"
+            "  title: stats && stats.attributes.title,"
+            "  ws: bar.querySelectorAll('.status-ws').length,"
+            "  connText: bar.querySelector('.conn').textContent };",
         )
 
         self.assertEqual(rendered["id"], "status-bar")
-        self.assertIn("demo", rendered["text"])
+        self.assertNotIn("demo", rendered["text"])
         self.assertIn("↑ 2.0k", rendered["text"])
         self.assertIn("↓ 500", rendered["text"])
-        self.assertIn("3 req", rendered["text"])
         self.assertIn("$0.01", rendered["text"])
-        self.assertIn("50% cached", rendered["text"])
+        self.assertIn("3 req", rendered["text"])
+        self.assertIn("50% cache", rendered["text"])
+        self.assertIn("3 requests", rendered["title"])
+        self.assertIn("50% cached", rendered["title"])
+        self.assertEqual(rendered["ws"], 0)
+        self.assertEqual(rendered["connText"], "")
 
-    def test_status_bar_without_usage_shows_no_totals(self):
+    def test_status_bar_without_usage_shows_only_connection_and_follow(self):
         rendered = self.run_module(
             module_url("components", "status-bar.js"),
             "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
             "state.active_workspace = null;"
             "state.cells = [];"
             "const bar = mod.renderStatusBar();"
-            "return { ws: bar.querySelector('.status-ws').textContent,"
+            "return { ws: bar.querySelectorAll('.status-ws').length,"
             "  stats: bar.querySelectorAll('.status-stats').length,"
+            "  connText: bar.querySelector('.conn').textContent,"
+            "  connTitle: bar.querySelector('.conn').attributes.title,"
             "  toggles: bar.querySelectorAll('.follow-toggle').length };",
         )
 
-        self.assertEqual(rendered["ws"], "No workspace")
+        self.assertEqual(rendered["ws"], 0)
         self.assertEqual(rendered["stats"], 0)
+        self.assertEqual(rendered["connText"], "")
+        self.assertIn("live updates", rendered["connTitle"].lower())
         self.assertEqual(rendered["toggles"], 1)
 
     def test_refresh_status_bar_replaces_only_the_status_bar_node(self):
@@ -575,7 +587,6 @@ class StatusBarRenderingTests(WebRenderingTestCase):
             "  replaced: document.getElementById('status-bar') !== bar,"
             "  shellChildren: shell.children.length,"
             "  bars: document.querySelectorAll('#status-bar').length,"
-            "  ws: document.getElementById('status-bar').querySelector('.status-ws').textContent,"
             "  toggles: document.getElementById('status-bar').querySelectorAll('.follow-toggle').length,"
             "};",
         )
@@ -583,8 +594,22 @@ class StatusBarRenderingTests(WebRenderingTestCase):
         self.assertTrue(rendered["replaced"])
         self.assertEqual(rendered["shellChildren"], 1)
         self.assertEqual(rendered["bars"], 1)
-        self.assertEqual(rendered["ws"], "demo")
         self.assertEqual(rendered["toggles"], 1)
+
+    def test_connection_state_is_a_dot_with_a_tooltip(self):
+        rendered = self.run_module(
+            module_url("components", "status-bar.js"),
+            "const shell = document.createElement('div');"
+            "shell.append(mod.renderStatusBar());"
+            "document.body.append(shell);"
+            "mod.setConnection('reconnecting');"
+            "const conn = document.getElementById('status-bar').querySelector('.conn');"
+            "return { text: conn.textContent, title: conn.attributes.title, cls: conn.className };",
+        )
+
+        self.assertEqual(rendered["text"], "")
+        self.assertEqual(rendered["cls"], "conn conn-reconnecting")
+        self.assertIn("reconnecting", rendered["title"].lower())
 
 
 class DataTabRenderingTests(WebRenderingTestCase):

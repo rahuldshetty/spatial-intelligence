@@ -886,7 +886,7 @@ await scenario("scroll", async () => {
   const button = scroll.followToggle();
   const box = button.querySelector("input");
   const label = button.textContent;
-  eq("scroll.toggle_starts_off", [scroll.isFollowing(), box.checked, label], [false, false, "Follow output"]);
+  eq("scroll.toggle_starts_off", [scroll.isFollowing(), box.checked, label], [false, false, "Follow"]);
 
   // Following is the reader's choice: a scroll while it is off changes nothing.
   panel.scrollTop = 0;

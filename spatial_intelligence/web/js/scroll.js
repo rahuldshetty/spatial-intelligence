@@ -111,10 +111,16 @@ let toggle = null;
 function syncToggle() {
   if (!toggle) return;
   toggle.checked = enabled;
-  if (toggle.parentElement) toggle.parentElement.classList.toggle("active", enabled);
+  const label = toggle.parentElement;
+  if (label) {
+    label.classList.toggle("active", enabled);
+    label.title = enabled
+      ? "Following new output — click to stop"
+      : "Follow new output as it arrives";
+  }
 }
 
-/** The status-bar checkbox that turns following on and off. */
+/** The compact status-bar toggle that turns following on and off. */
 export function followToggle() {
   const box = document.createElement("input");
   box.type = "checkbox";
@@ -122,9 +128,15 @@ export function followToggle() {
   const label = document.createElement("label");
   label.className = "follow-toggle";
   label.setAttribute("for", "follow-output");
-  label.title = "Scroll to the bottom as new output arrives";
-  label.append(box, document.createTextNode("Follow output"));
+  label.title = enabled
+    ? "Following new output — click to stop"
+    : "Follow new output as it arrives";
+  const text = document.createElement("span");
+  text.className = "follow-label";
+  text.textContent = "Follow";
+  label.append(box, text);
   box.checked = enabled;
+  box.setAttribute("aria-label", "Follow output");
   label.classList.toggle("active", enabled);
   box.addEventListener("change", () => setFollowing(box.checked));
   toggle = box;

@@ -24,6 +24,7 @@
   --primary-border: #c7d2fe;
 
   --accent: #0891b2;
+  --accent-soft: #ecfeff;
 
   --success: #16a34a;
   --success-soft: #ecfdf5;
@@ -40,7 +41,9 @@
   --radius: 10px;
   --radius-lg: 14px;
 
-  --menubar-h: 48px;
+  --menubar-h: 50px;
+  --panel-width: 432px;
+  --focus-ring: 0 0 0 3px var(--primary-soft);
 }
 
 [data-theme="dark"] {
@@ -62,6 +65,7 @@
   --primary-border: #373a6b;
 
   --accent: #22d3ee;
+  --accent-soft: #0b2b32;
 
   --success: #22c55e;
   --success-soft: #0d2119;

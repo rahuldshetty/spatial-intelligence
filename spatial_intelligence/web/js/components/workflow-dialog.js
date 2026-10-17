@@ -10,11 +10,19 @@ drawn shape.
 
 "use strict";
 
-import { createWorkspace, listWorkflows } from "../api.js";
-import { closeDialog, el, openDialog, toast } from "../dom.js";
+import {
+  checkImportUrl,
+  createWorkspace,
+  getState,
+  importFilesWithProgress,
+  importUrl as postImportUrl,
+  listWorkflows,
+} from "../api.js";
+import { closeDialog, el, formatBytes, openDialog, toast } from "../dom.js";
 // `state` is the wizard's own draft inside this module, so the store comes in
 // under a name that cannot be shadowed by it.
 import { applySnapshot, state as appState } from "../store.js";
+import { icon } from "../icons.js";
 import { buildField } from "./fields.js";
 import { workflowArt } from "./workflow-art.js";
 
@@ -29,11 +37,24 @@ export function openWorkflowDialog() {
   openDialog(
     (dialog) => {
       dialog.classList.add("wizard-dialog");
-      dialog.append(el("h3", { text: "New workspace" }));
 
+      const header = el("div", { class: "wizard-header" });
+      const mark = el("span", { class: "wizard-mark" });
+      mark.append(icon("sparkles", { size: 22 }));
+      const headerCopy = el("div", { class: "wizard-header-copy" });
+      headerCopy.append(
+        el("h3", { text: "New workspace" }),
+        el("p", {
+          class: "wizard-subtitle",
+          text: "Choose a workspace type, set its inputs, and review before creating it.",
+        })
+      );
+      header.append(mark, headerCopy);
+      dialog.append(header);
+
+      const body = el("div", { class: "wizard-body" });
       const indicator = el("ol", { class: "wizard-steps" });
       indicator.hidden = true;
-      dialog.append(indicator);
 
       const typeStep = el("section", { class: "wizard-step" });
       const reviewStep = el("section", { class: "wizard-step" });
@@ -41,20 +62,35 @@ export function openWorkflowDialog() {
       const nodes = { type: typeStep, review: reviewStep };
       const readers = {};
       const errors = {};
-      dialog.append(typeStep, reviewStep);
+      body.append(indicator, typeStep, reviewStep);
+      dialog.append(body);
 
       // One footer for every step: the chrome (title, progress, actions) stays
       // put while the body scrolls, and the primary button means whatever the
       // step it is on needs — Next, or Create on the summary.
-      const cancelBtn = el("button", { text: "Cancel", onclick: closeDialog });
-      const backBtn = el("button", { text: "Back" });
+      const cancelBtn = el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Cancel",
+        onclick: closeDialog,
+      });
+      const stepStatus = el("span", { class: "wizard-step-status" });
+      const backBtn = el("button", { class: "secondary", type: "button" });
+      backBtn.append(icon("chevron-left", { size: 14 }), el("span", { text: "Back" }));
       backBtn.hidden = true;
-      const primaryBtn = el("button", { class: "primary", text: "Next" });
+      const primaryBtn = el("button", { class: "primary", type: "button" });
       primaryBtn.disabled = true;
+      const setPrimary = (label, iconName, spinning = false) => {
+        primaryBtn.replaceChildren(
+          icon(iconName, { size: 14, class: spinning ? "spin" : "" }),
+          el("span", { text: label })
+        );
+      };
+      setPrimary("Next", "arrow-right");
       const footer = el("div", { class: "wizard-footer" });
       const footerLeft = el("div", { class: "wizard-footer-group" });
       const footerRight = el("div", { class: "wizard-footer-group" });
-      footerLeft.append(cancelBtn);
+      footerLeft.append(cancelBtn, stepStatus);
       footerRight.append(backBtn, primaryBtn);
       footer.append(footerLeft, footerRight);
       dialog.append(footer);
@@ -67,6 +103,12 @@ export function openWorkflowDialog() {
       ];
       let chips = [];
       let builtFor = null;
+      let attachmentsCard = null;
+      let attachmentsList = null;
+      let creating = false;
+      let retryMode = false;
+      let workspaceCreated = false;
+      const attachments = [];
 
       // Steps derived from the workflow's params, in a fixed group order.
       function planSteps(workflow) {
@@ -78,6 +120,15 @@ export function openWorkflowDialog() {
         ]
           .map(([key, label, match]) => ({ key, label, fields: fields.filter(match) }))
           .filter((step) => step.fields.length);
+      }
+
+      /** The full step list for a workflow, used before its sections exist. */
+      function orderFor(workflow) {
+        return [
+          { key: "type", label: "Type" },
+          ...planSteps(workflow).map(({ key, label }) => ({ key, label })),
+          { key: "review", label: "Review" },
+        ];
       }
 
       function renderIndicator() {
@@ -103,17 +154,21 @@ export function openWorkflowDialog() {
           node.hidden = !active;
         }
         backBtn.hidden = key === "type";
-        primaryBtn.textContent = key === "review" ? "Create" : "Next";
+        setPrimary(key === "review" ? "Create" : "Next", key === "review" ? "check-circle" : "arrow-right");
         // The area-of-interest step reads the live map, so the backdrop lifts to
         // a hint of tint there and stays dimmed everywhere else.
         const overlay = document.getElementById("overlay");
         if (overlay) overlay.classList.toggle("map-live", key === "aoi");
         const index = order.findIndex((step) => step.key === key);
-        indicator.hidden = key === "type";
+        indicator.hidden = false;
         chips.forEach((chip, i) => {
           chip.classList.toggle("active", i === index);
           chip.classList.toggle("done", i < index);
         });
+        stepStatus.textContent =
+          index >= 0 ? "Step " + (index + 1) + " of " + order.length : "";
+        const scroller = dialog.querySelector(".wizard-body");
+        if (scroller) scroller.scrollTop = 0;
       }
 
       function disposeParamSteps() {
@@ -123,6 +178,282 @@ export function openWorkflowDialog() {
           delete nodes[key];
           delete readers[key];
         }
+      }
+
+      // -- optional workspace files --------------------------------------
+      function attachmentsSection() {
+        if (attachmentsCard) return attachmentsCard;
+        attachmentsCard = el("div", { class: "wizard-field wizard-attachments" });
+        const actions = el("div", { class: "attachment-actions" });
+        const filesInput = el("input", {
+          type: "file",
+          multiple: "multiple",
+          style: "display:none",
+        });
+        const folderInput = el("input", {
+          type: "file",
+          webkitdirectory: "",
+          style: "display:none",
+        });
+        filesInput.addEventListener("change", () => {
+          addLocalFiles(filesInput.files, false);
+          filesInput.value = "";
+        });
+        folderInput.addEventListener("change", () => {
+          addLocalFiles(folderInput.files, true);
+          folderInput.value = "";
+        });
+        actions.append(
+          filesInput,
+          folderInput,
+          attachmentButton("upload", "Add files", () => filesInput.click()),
+          attachmentButton("folder-open", "Add folder", () => folderInput.click())
+        );
+
+        const urlRow = el("div", { class: "attachment-url-row" });
+        const urlInput = el("input", {
+          type: "url",
+          class: "attachment-url-input",
+          placeholder: "https://example.com/file.tif",
+          "aria-label": "URL to download into the workspace",
+        });
+        const urlButton = el("button", {
+          type: "button",
+          class: "secondary",
+          text: "Add link",
+        });
+        const urlStatus = el("span", { class: "attachment-url-status" });
+        const addUrl = () => addAttachmentUrl(urlInput, urlStatus, urlButton);
+        urlButton.addEventListener("click", addUrl);
+        urlInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            addUrl();
+          }
+        });
+        urlRow.append(urlInput, urlButton, urlStatus);
+
+        attachmentsList = el("ul", { class: "attachment-list" });
+        attachmentsCard.append(
+          el("div", { class: "wizard-section-title", text: "Workspace files" }),
+          el("span", {
+            class: "wizard-hint",
+            text:
+              "Optional. Copy files or a folder, or download a link, into data/. A short note tells the agent what each input is.",
+          }),
+          actions,
+          urlRow,
+          el("p", { class: "attachment-empty", text: "No files attached yet." }),
+          attachmentsList
+        );
+        renderAttachments();
+        return attachmentsCard;
+      }
+
+      function attachmentButton(name, label, onclick) {
+        const button = el("button", { type: "button", class: "secondary", onclick });
+        button.append(icon(name, { size: 14 }), el("span", { text: label }));
+        return button;
+      }
+
+      function addLocalFiles(fileList, isFolder) {
+        if (creating) return;
+        const files = Array.from(fileList || []);
+        if (!files.length) return;
+        if (isFolder) {
+          const first = files[0].webkitRelativePath || files[0].name;
+          const folder = first.split("/")[0] || "folder";
+          const path = "data/" + folder + "/";
+          if (!attachments.some((item) => item.path === path)) {
+            attachments.push({
+              kind: "folder",
+              files,
+              label: folder,
+              path,
+              description: "",
+              state: "ready",
+              meta: files.length + (files.length === 1 ? " file" : " files"),
+            });
+          }
+        } else {
+          for (const file of files) {
+            const relative = file.webkitRelativePath || file.name;
+            const path = "data/" + relative;
+            if (attachments.some((item) => item.path === path)) continue;
+            attachments.push({
+              kind: "file",
+              file,
+              label: file.name,
+              path,
+              description: "",
+              state: "ready",
+              meta: formatBytes(file.size),
+            });
+          }
+        }
+        renderAttachments();
+      }
+
+      async function addAttachmentUrl(input, status, button) {
+        if (creating) return;
+        const url = input.value.trim();
+        if (!url) {
+          status.className = "attachment-url-status error";
+          status.textContent = "Enter a link first.";
+          return;
+        }
+        button.disabled = true;
+        status.className = "attachment-url-status";
+        status.textContent = "Checking reachability…";
+        try {
+          const check = await checkImportUrl(url);
+          if (!check.ok) {
+            status.className = "attachment-url-status error";
+            status.textContent = "Unreachable: " + (check.error || "no response");
+            return;
+          }
+          const filename = check.filename || "download";
+          const path = "data/" + filename;
+          if (!attachments.some((item) => item.path === path)) {
+            attachments.push({
+              kind: "url",
+              url,
+              label: filename,
+              path,
+              description: "",
+              state: "ready",
+              meta: check.content_length ? formatBytes(check.content_length) : "link",
+            });
+            status.className = "attachment-url-status success";
+            status.textContent = "Added " + filename;
+            input.value = "";
+            renderAttachments();
+          } else {
+            status.className = "attachment-url-status";
+            status.textContent = filename + " is already attached.";
+          }
+        } catch (error) {
+          status.className = "attachment-url-status error";
+          status.textContent = error.message || String(error);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      function attachmentKindIcon(item) {
+        if (item.kind === "folder") return "folder";
+        if (item.kind === "url") return "download";
+        return "file";
+      }
+
+      function attachmentStatus(item) {
+        if (item.state === "working") {
+          if (item.kind === "url") return "Downloading…";
+          return "Uploading " + Math.round((item.progress || 0) * 100) + "%";
+        }
+        if (item.state === "done") return item.kind === "url" ? "Downloaded" : "Copied";
+        if (item.state === "error") return "Failed";
+        return item.meta || "Ready";
+      }
+
+      function renderAttachments() {
+        if (!attachmentsCard) return;
+        const empty = attachmentsCard.querySelector(".attachment-empty");
+        if (empty) empty.hidden = attachments.length > 0;
+        attachmentsList.replaceChildren();
+        for (const item of attachments) {
+          const row = el("li", { class: "attachment-item state-" + item.state });
+          const mark = el("span", { class: "attachment-icon" });
+          mark.append(icon(attachmentKindIcon(item), { size: 16 }));
+          const main = el("div", { class: "attachment-main" });
+          const title = el("div", { class: "attachment-title" });
+          title.append(
+            el("strong", { class: "attachment-name", text: item.label, title: item.path }),
+            el("span", { class: "attachment-meta", text: item.path })
+          );
+          const note = el("input", {
+            type: "text",
+            class: "attachment-note",
+            placeholder: "What is this file about? (optional)",
+            value: item.description || "",
+          });
+          note.addEventListener("input", () => {
+            item.description = note.value;
+          });
+          const progress = el("div", { class: "attachment-progress" });
+          const fill = el("span", { class: "attachment-progress-fill" });
+          progress.append(fill);
+          main.append(title, note, progress);
+          const status = el("span", { class: "attachment-status", text: attachmentStatus(item) });
+          const remove = el("button", {
+            type: "button",
+            class: "attachment-remove",
+            title: "Remove",
+            "aria-label": "Remove " + item.label,
+            onclick: () => {
+              if (creating) return;
+              const index = attachments.indexOf(item);
+              if (index >= 0) attachments.splice(index, 1);
+              renderAttachments();
+            },
+          });
+          remove.append(icon("x", { size: 13 }));
+          row.append(mark, main, status, remove);
+          item.ui = { row, status, fill, progress, note, remove };
+          updateAttachmentRow(item);
+          attachmentsList.append(row);
+        }
+      }
+
+      function updateAttachmentRow(item) {
+        if (!item.ui) return;
+        const { row, status, fill, progress, note, remove } = item.ui;
+        row.className = "attachment-item state-" + item.state;
+        status.textContent = attachmentStatus(item);
+        status.title = item.state === "error" ? item.error || "Failed" : "";
+        status.className = "attachment-status" + (item.state === "error" ? " error" : "");
+        const active = item.state === "working";
+        progress.hidden = !active;
+        if (active) fill.style.width = Math.round((item.progress || 0) * 100) + "%";
+        note.disabled = creating || retryMode || workspaceCreated || item.state === "done";
+        remove.disabled = creating || workspaceCreated;
+      }
+
+      function attachmentParams() {
+        return attachments
+          .filter((item) => item.path)
+          .map((item) => ({
+            path: item.path,
+            description: (item.description || "").trim(),
+          }));
+      }
+
+      async function transferAttachments() {
+        for (const item of attachments) {
+          if (item.state === "done") continue;
+          item.state = "working";
+          item.progress = 0;
+          item.error = "";
+          updateAttachmentRow(item);
+          try {
+            if (item.kind === "url") {
+              await postImportUrl(item.url, item.label);
+            } else {
+              const files = item.kind === "folder" ? item.files : [item.file];
+              await importFilesWithProgress(files, (fraction) => {
+                item.progress = fraction;
+                updateAttachmentRow(item);
+              });
+            }
+            item.state = "done";
+            item.progress = 1;
+          } catch (error) {
+            item.state = "error";
+            item.error = error.message || String(error);
+          }
+          updateAttachmentRow(item);
+        }
+        return attachments.some((item) => item.state === "error");
       }
 
       function heading(workflow) {
@@ -171,11 +502,20 @@ export function openWorkflowDialog() {
 
       typeStep.append(
         el("div", { class: "wizard-field" }, [
-          el("label", { class: "wizard-label", text: "Name" }),
+          el("label", { class: "wizard-label", text: "Workspace name" }),
+          el("span", {
+            class: "wizard-hint",
+            text: "This becomes the folder name. Letters, numbers, spaces, dots, dashes, and underscores.",
+          }),
           nameInput,
         ]),
         el("div", { class: "wizard-field" }, [
           el("div", { class: "wizard-section-title", text: "Workspace type" }),
+          el("span", {
+            class: "wizard-hint",
+            text:
+              "A workflow adds a prompt cell already set up for the task. You can edit and run it like any other cell.",
+          }),
           cards,
         ]),
         typeError
@@ -198,7 +538,7 @@ export function openWorkflowDialog() {
           const card = el("label", {
             class: "wizard-card" + (input.checked ? " selected" : ""),
           });
-          card.append(input, workflowArt(workflow.id, { size: 72 }), copy);
+          card.append(input, workflowArt(workflow.id, { size: 64 }), copy);
           input.addEventListener("change", () => {
             if (!input.checked) return;
             state.workflow = workflow;
@@ -207,6 +547,10 @@ export function openWorkflowDialog() {
             for (const node of cards.querySelectorAll(".wizard-card")) {
               node.classList.toggle("selected", node === card);
             }
+            // Show the shape of the flow the choice creates before Next.
+            order = orderFor(workflow);
+            renderIndicator();
+            show("type");
           });
           cards.append(card);
         }
@@ -273,9 +617,14 @@ export function openWorkflowDialog() {
       });
 
       primaryBtn.addEventListener("click", () => {
+        if (creating) return;
         if (current === "review") {
+          if (retryMode) {
+            retryFailed(errors.review);
+            return;
+          }
           if (errors.review) errors.review.textContent = "";
-          submit(errors.review);
+          runSetup(errors.review);
           return;
         }
         const params = validate(current);
@@ -288,11 +637,7 @@ export function openWorkflowDialog() {
       // -- param steps: one section per group, each validating its own fields
       function buildParamSteps() {
         disposeParamSteps();
-        order = [
-          { key: "type", label: "Type" },
-          ...planSteps(state.workflow),
-          { key: "review", label: "Review" },
-        ];
+        order = orderFor(state.workflow);
         for (const step of planSteps(state.workflow)) {
           const node = el("section", { class: "wizard-step" });
           node.hidden = true;
@@ -304,13 +649,14 @@ export function openWorkflowDialog() {
             stepReaders.push({ field, read });
             node.append(group);
           }
+          if (step.key === "details") node.append(attachmentsSection());
           node.append(error);
           nodes[step.key] = node;
           readers[step.key] = stepReaders;
           errors[step.key] = error;
           // Keep Review last in the document: the sections are hidden and shown
           // rather than rebuilt, so their order is only for the reading order.
-          dialog.insertBefore(node, reviewStep);
+          body.insertBefore(node, reviewStep);
         }
         renderIndicator();
       }
@@ -336,23 +682,96 @@ export function openWorkflowDialog() {
         for (const field of state.workflow.params || []) {
           addRow(list, field.label, formatValue(state.params[field.id]));
         }
+        const attached = attachmentParams();
+        if (attached.length) {
+          addRow(
+            list,
+            "Files",
+            attached
+              .map((item) => item.path + (item.description ? " — " + item.description : ""))
+              .join("; ")
+          );
+        }
         reviewStep.append(heading(state.workflow), list, error);
         show("review");
       }
 
-      async function submit(error) {
+      function lockSetup(locked) {
+        cancelBtn.disabled = locked;
+        backBtn.disabled = locked;
+        primaryBtn.disabled = locked;
+        renderAttachments();
+      }
+
+      async function runSetup(error) {
+        creating = true;
+        retryMode = false;
+        error.textContent = "";
+        lockSetup(true);
+        setPrimary("Creating workspace…", "loader-circle", true);
+        stepStatus.textContent = "Creating workspace";
         try {
-          const snapshot = await createWorkspace(state.name, state.workflow.id, state.params);
-          closeDialog();
+          const params = { ...state.params, attachments: attachmentParams() };
+          const snapshot = await createWorkspace(state.name, state.workflow.id, params);
+          workspaceCreated = true;
           applySnapshot(snapshot);
-          toast("Workspace " + state.name + " created");
+          const failed = await transferAttachments();
+          applySnapshot(await getState());
+          creating = false;
+          if (!failed) {
+            closeDialog();
+            toast("Workspace " + state.name + " created", "success");
+            return;
+          }
+          retryMode = true;
+          error.textContent =
+            "The workspace was created, but some files could not be transferred. " +
+            "Retry them here, or close this dialog and add them from the Data tab.";
+          lockSetup(false);
+          backBtn.disabled = true;
+          setPrimary("Retry failed files", "refresh-cw");
+          stepStatus.textContent = "Workspace created";
+          renderAttachments();
         } catch (err) {
+          creating = false;
+          lockSetup(false);
+          setPrimary("Create", "check-circle");
           const message = err.message || String(err);
           error.textContent = message;
-          toast(message);
+          toast(message, "error");
         }
       }
 
+      async function retryFailed(error) {
+        if (creating) return;
+        creating = true;
+        error.textContent = "";
+        lockSetup(true);
+        setPrimary("Retrying files…", "loader-circle", true);
+        try {
+          const failed = await transferAttachments();
+          applySnapshot(await getState());
+          creating = false;
+          if (!failed) {
+            closeDialog();
+            toast("Workspace " + state.name + " created", "success");
+            return;
+          }
+          retryMode = true;
+          lockSetup(false);
+          backBtn.disabled = true;
+          setPrimary("Retry failed files", "refresh-cw");
+          renderAttachments();
+        } catch (err) {
+          creating = false;
+          lockSetup(false);
+          backBtn.disabled = true;
+          setPrimary("Retry failed files", "refresh-cw");
+          error.textContent = err.message || String(err);
+        }
+      }
+
+      renderIndicator();
       show("type");
       nameInput.focus();
     },

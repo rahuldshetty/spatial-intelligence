@@ -1,6 +1,7 @@
 /* Agent trace: one ordered renderer, plus a live fast path for streamed text. */
 
 import { codeBlock, compactPreview, el, prettyValue } from "../dom.js";
+import { icon } from "../icons.js";
 import { jobsFor, state, stepKey } from "../store.js";
 import { cellOutputText, renderMarkdown, visibleTraceGroups } from "./markdown.js";
 import { planFromTrace, renderPlan } from "./plan.js";
@@ -81,10 +82,9 @@ function toolStepNode(group) {
     "data-trace-key": "call:" + ((call && call.tool_call_id) || name),
   });
   const summary = el("summary", {});
-  summary.append(
-    el("span", { class: "trace-icon", text: "→" }),
-    el("span", { class: "trace-name", text: name || "" })
-  );
+  const mark = el("span", { class: "trace-icon" });
+  mark.append(icon("arrow-right", { size: 13 }));
+  summary.append(mark, el("span", { class: "trace-name", text: name || "" }));
   const preview = toolPreview(name, call, result, isCode);
   if (preview) summary.append(el("span", { class: "trace-preview", text: preview }));
   details.append(summary);
@@ -171,15 +171,6 @@ export function groupTraceSteps(trace) {
   }
   flush();
   return groups;
-}
-
-/** Render one grouped trace step; usage groups live in the status bar instead. */
-export function renderStepNode(group) {
-  if (!group) return null;
-  if (group.type === "text") return traceTextNode(group.content);
-  if (group.type === "tool") return toolStepNode(group);
-  if (group.type === "plan") return renderPlan(group.items);
-  return null;
 }
 
 /**

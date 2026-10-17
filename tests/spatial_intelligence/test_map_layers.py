@@ -276,6 +276,36 @@ class MapLayerServiceTests(MapTestCase):
             layerops.find_layer(self.map, layer_id)["sourcePath"], url_for("data/scene.tif")
         )
 
+    def test_rename_local_sources_repoints_the_layer(self):
+        self.write("data/scene.tif", b"scene")
+        layer_id = layerops.add_raster(
+            self.workspace, self.map, "data/scene.tif", "Scene", file_url=url_for
+        )
+
+        count = layerops.rename_local_sources(
+            self.map, self.workspace, "data/scene.tif", "data/moved.tif", url_for
+        )
+
+        layer = layerops.find_layer(self.map, layer_id)
+        self.assertEqual(count, 1)
+        self.assertEqual(layer["sourcePath"], url_for("data/moved.tif"))
+        self.assertEqual(
+            layer["metadata"][layerops.LOCAL_SOURCE_KEY], "data/moved.tif"
+        )
+
+    def test_remove_local_sources_drops_layers_that_served_the_file(self):
+        self.write("data/scene.tif", b"scene")
+        layer_id = layerops.add_raster(
+            self.workspace, self.map, "data/scene.tif", "Scene", file_url=url_for
+        )
+
+        removed = layerops.remove_local_sources(
+            self.map, self.workspace, "data/scene.tif"
+        )
+
+        self.assertEqual(removed, [layer_id])
+        self.assertIsNone(layerops.find_layer(self.map, layer_id))
+
     def test_repoint_leaves_remote_layers_alone(self):
         layer_id = self.map.add_raster("https://example.com/remote.tif", "Remote")
 

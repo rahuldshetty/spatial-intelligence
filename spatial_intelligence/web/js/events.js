@@ -8,6 +8,10 @@ const INITIAL_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30000;
 
 export function connectEvents(handlers = {}) {
+  const reportStatus = typeof handlers.onStatus === "function" ? handlers.onStatus : null;
+  const status = (value) => {
+    if (reportStatus) reportStatus(value);
+  };
   const routes = EVENT_ROUTES.map((name) => {
     const handler = handlers["on" + name.charAt(0).toUpperCase() + name.slice(1)];
     return [name, typeof handler === "function" ? handler : null];
@@ -17,12 +21,14 @@ export function connectEvents(handlers = {}) {
   let retryTimer = null;
   let delay = INITIAL_DELAY_MS;
   let closed = false;
+  status("connecting");
 
   const open = () => {
     if (closed) return;
     source = new EventSource("/api/events");
     source.addEventListener("open", () => {
       delay = INITIAL_DELAY_MS;
+      status("live");
     });
     for (const [name, handler] of routes) {
       if (!handler) continue;
@@ -37,6 +43,7 @@ export function connectEvents(handlers = {}) {
       });
     }
     source.onerror = () => {
+      status("reconnecting");
       // The browser would reconnect immediately and forever; closing the
       // stream hands retry timing to the exponential backoff below.
       if (source) {

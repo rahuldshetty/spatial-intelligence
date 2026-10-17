@@ -684,12 +684,11 @@ const scenarios = {
       markdown: names(markdown, ["renderMarkdown", "visibleTraceGroups", "escapeHtml"]),
       plan: names(plan, ["renderPlan", "planFromTrace"]),
       progress: names(progress, ["renderJob", "updateJob"]),
-      trace: names(trace, ["renderTrace", "groupTraceSteps", "renderStepNode", "repaintTrace"]),
+      trace: names(trace, ["renderTrace", "groupTraceSteps", "repaintTrace"]),
       interaction: names(interaction, ["renderInteraction", "revealInteraction"]),
       cell: names(cellModule, ["renderCell"]),
       cells: names(cellsPage, ["renderCellsTab", "renderCellsOnly", "renderAddCellRow", "editMarkdown", "focusCell", "addCell"]),
       aliases: {
-        renderJobNode: progress.renderJobNode === progress.renderJob,
         updateJobNode: progress.updateJobNode === progress.updateJob,
         applyTrace: typeof trace.applyTrace,
         flushPendingTrace: typeof trace.flushPendingTrace,
@@ -793,10 +792,6 @@ const scenarios = {
       summaries,
       by_name: byName.map((group) => ({ type: group.type, paired: Boolean(group.result) })),
       orphan: orphan.map((group) => ({ type: group.type, call: group.call, name: group.result && group.result.name })),
-      tool: dump(trace.renderStepNode(grouped[1])),
-      text: dump(trace.renderStepNode(grouped[0])),
-      usage: trace.renderStepNode(grouped[3]),
-      empty: trace.renderStepNode(null),
     };
   },
 
@@ -1312,6 +1307,7 @@ class ScenarioCase(unittest.TestCase):
             directory.mkdir(parents=True)
         for name in COMPONENTS:
             shutil.copy2(JS / "components" / f"{name}.js", components / f"{name}.js")
+        shutil.copy2(JS / "icons.js", cls.root / "js" / "icons.js")
         shutil.copy2(JS / "pages" / "cells.js", pages / "cells.js")
         shutil.copy2(JS / "scroll.js", cls.root / "js" / "scroll.js")
         shutil.copy2(JS / "bridge.js", cls.root / "js" / "bridge.js")
@@ -1361,7 +1357,6 @@ class ExportsTests(ScenarioCase):
         self.assertEqual(
             self.result["aliases"],
             {
-                "renderJobNode": True,
                 "updateJobNode": True,
                 "applyTrace": "function",
                 "flushPendingTrace": "function",
@@ -1473,17 +1468,6 @@ class TraceGroupingTests(ScenarioCase):
 
     def test_unmatched_result_becomes_its_own_group(self):
         self.assertEqual(self.result["orphan"], [{"type": "tool", "call": None, "name": "lost"}])
-
-    def test_step_nodes_render_per_group_type(self):
-        tool = self.result["tool"]
-        self.assertIn("tool-call", tool["class"])
-        self.assertIn("run_python", tool["text"])
-        text = self.result["text"]
-        self.assertIn("trace-text", text["class"])
-        self.assertEqual(text["attrs"]["data-source"], "one two")
-        self.assertIn("<p>one two</p>", text["html"])
-        self.assertIsNone(self.result["usage"])
-        self.assertIsNone(self.result["empty"])
 
 
 class TraceLayoutTests(ScenarioCase):

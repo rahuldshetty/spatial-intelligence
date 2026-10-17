@@ -156,7 +156,7 @@ def axis_starts(length: int, tile: int, overlap: int) -> list[int]:
 def axis_boundaries(starts: list[int], tile: int, length: int) -> list[float]:
     """Return the split points between windows, at the middle of each overlap."""
     boundaries = [0.0]
-    for left, right in zip(starts, starts[1:]):
+    for left, right in zip(starts[:-1], starts[1:], strict=True):
         boundaries.append((left + tile + right) / 2.0)
     boundaries.append(float(length))
     return boundaries

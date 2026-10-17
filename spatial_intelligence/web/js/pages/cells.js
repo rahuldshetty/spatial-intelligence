@@ -2,19 +2,36 @@
 
 import { el, toast } from "../dom.js";
 import { addCell as createCell, updateCell } from "../api.js";
+import { icon } from "../icons.js";
 import { hold, isFollowing, scrollTo } from "../scroll.js";
 import { jobsFor, normalizeCells, setState, state } from "../store.js";
 import { renderCell } from "../components/cell.js";
 import { renderJob } from "../components/progress.js";
 
+function addButton(kind, label, iconName) {
+  const button = el("button", { type: "button", onclick: () => addCell(kind) });
+  button.append(icon(iconName, { size: 14 }), el("span", { text: label }));
+  return button;
+}
+
 export function renderAddCellRow() {
   const row = el("div", { class: "add-cell-row" });
   row.append(
-    el("button", { text: "+ Markdown", onclick: () => addCell("markdown") }),
-    el("button", { text: "+ Python", onclick: () => addCell("python") }),
-    el("button", { text: "+ Prompt", onclick: () => addCell("prompt") })
+    addButton("markdown", "+ Markdown", "text"),
+    addButton("python", "+ Python", "code"),
+    addButton("prompt", "+ Prompt", "sparkles")
   );
   return row;
+}
+
+function emptyState(iconName, title, detail) {
+  const box = el("div", { class: "empty-hint" });
+  box.append(
+    icon(iconName, { size: 26, class: "empty-icon" }),
+    el("strong", { class: "empty-title", text: title }),
+    el("span", { class: "empty-detail", text: detail })
+  );
+  return box;
 }
 
 export function renderCellsTab() {
@@ -22,13 +39,23 @@ export function renderCellsTab() {
 
   if (!state.active_workspace) {
     wrap.append(
-      el("div", { class: "empty-hint", text: "No workspace open — File → New or Open" })
+      emptyState(
+        "globe",
+        "No workspace open — File → New or Open",
+        "A workspace is the folder the agent reads, writes, and maps."
+      )
     );
     return wrap;
   }
 
   if (!state.cells.length && !(state.jobs || []).length) {
-    wrap.append(el("div", { class: "empty-hint", text: "No cells yet — add a cell above." }));
+    wrap.append(
+      emptyState(
+        "sparkles",
+        "No cells yet — add a cell above.",
+        "Add a Prompt cell and ask a question in plain language; or write Python and Markdown yourself."
+      )
+    );
     return wrap;
   }
 
@@ -77,7 +104,7 @@ export function editMarkdown(cell) {
     try {
       await updateCell(cell.id, ta.value);
     } catch (e) {
-      toast(e.message || String(e));
+      toast(e.message || String(e), "error");
     }
     renderCellsOnly();
   });
@@ -101,7 +128,7 @@ export function focusCell(cell) {
 
 export async function addCell(kind) {
   if (!state.active_workspace) {
-    toast("No workspace open");
+    toast("No workspace open", "warning");
     return;
   }
   const before = new Set(state.cells.map((cell) => cell.id));
@@ -120,6 +147,6 @@ export async function addCell(kind) {
       if (follow) follow.jump();
     }
   } catch (e) {
-    toast(e.message || String(e));
+    toast(e.message || String(e), "error");
   }
 }

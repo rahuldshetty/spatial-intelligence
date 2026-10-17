@@ -615,7 +615,7 @@ class DataTabRenderingTests(WebRenderingTestCase):
             "  hints: tab.querySelectorAll('.empty-hint').length,"
             "  multiple: inputs.filter((i) => i.attributes.multiple === 'multiple').length,"
             "  folder: inputs.filter((i) => 'webkitdirectory' in i.attributes).length,"
-            "  urlInput: tab.querySelector('input[type=\"url\"]').attributes.placeholder,"
+            "  urlInputs: tab.querySelectorAll('input[type=\"url\"]').length,"
             "  buttons: [...tab.querySelectorAll('.import-row button')]"
             "    .map((button) => button.textContent),"
             "  treeNames: [...tab.querySelectorAll('.tree-name')].map((s) => s.textContent),"
@@ -627,27 +627,12 @@ class DataTabRenderingTests(WebRenderingTestCase):
         self.assertEqual(rendered["hints"], 0)
         self.assertEqual(rendered["multiple"], 1)
         self.assertEqual(rendered["folder"], 1)
-        self.assertEqual(rendered["urlInput"], "https://example.com/file.tif")
+        self.assertEqual(rendered["urlInputs"], 0)
         self.assertIn("Import files…", rendered["buttons"])
         self.assertIn("Import folder…", rendered["buttons"])
-        self.assertIn("Download", rendered["buttons"])
+        self.assertIn("Add from URL…", rendered["buttons"])
         self.assertIn("zones", rendered["treeNames"])
         self.assertIn("roads.geojson", rendered["treeNames"])
-
-    def test_import_url_without_a_url_warns_instead_of_requesting(self):
-        rendered = self.run_module(
-            module_url("pages", "data.js"),
-            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
-            "state.active_workspace = 'demo';"
-            "state.files = [];"
-            "const tab = mod.renderDataTab();"
-            "const rows = tab.querySelectorAll('.import-row');"
-            "const download = rows[rows.length - 1].querySelector('button');"
-            "download.click();"
-            "return { toast: (document.getElementById('toast') || { textContent: '' }).textContent };",
-        )
-
-        self.assertEqual(rendered["toast"], "Enter a URL first")
 
 
 if __name__ == "__main__":

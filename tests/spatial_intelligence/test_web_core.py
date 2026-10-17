@@ -167,13 +167,16 @@ class ShimNode {
     this.children = [textNode(value)];
   }
   get innerHTML() {
-    return this.children.map((child) => child.textContent).join("");
+    // Markup is kept out of textContent, as in a real DOM: SVG icons and
+    // rendered HTML do not leak their tags into the visible text.
+    return this._html === undefined ? this.children.map((child) => child.textContent).join("") : this._html;
   }
   set innerHTML(value) {
     this.children.forEach((child) => {
       child.parentNode = null;
     });
-    this.children = value ? [textNode(value)] : [];
+    this.children = [];
+    this._html = value ? String(value) : "";
   }
   setAttribute(name, value) {
     this.attributes.set(name, String(value));
@@ -753,7 +756,7 @@ if (gated) {
       "store.js": ["state", "setState", "subscribe", "notify", "isGeneratedCell", "normalizeCells", "jobsFor", "upsertJob", "usageTotals", "applySnapshot"],
       "api.js": ["request", "getState", "updateSettings", "createWorkspace", "openWorkspace", "saveWorkspace", "closeWorkspace", "addCell", "updateCell", "deleteCell", "moveCell", "runCell", "stopCell", "runAll", "respondInteraction", "cancelInteraction", "importFiles", "importUrl", "setMapProject", "reportBridge"],
       "events.js": ["connectEvents"],
-      "pages/shell.js": ["mountShell", "renderShell", "renderSidePanel", "renderActiveTab", "renderTabContent"],
+      "pages/shell.js": ["mountShell", "renderShell", "renderSidePanel", "renderTabContent"],
       "pages/map.js": ["mountMap", "syncMap"],
       "components/menubar.js": ["renderMenubar", "closeAllMenus"],
       "components/settings-dialog.js": ["openSettingsDialog"],

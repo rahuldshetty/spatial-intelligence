@@ -2,6 +2,7 @@
 
 import { el, expandableContent, toast, usageLabel, usageTitle } from "../dom.js";
 import { deleteCell, moveCell, runCell, stopCell, updateCell } from "../api.js";
+import { icon } from "../icons.js";
 import { state } from "../store.js";
 import { cellOutputText, renderMarkdown } from "./markdown.js";
 import { renderTrace } from "./trace.js";
@@ -11,7 +12,7 @@ import { editMarkdown } from "../pages/cells.js";
 function act(action) {
   Promise.resolve()
     .then(action)
-    .catch((error) => toast(error.message || String(error)));
+    .catch((error) => toast(error.message || String(error), "error"));
 }
 
 function cellBadge(kind, geoai) {
@@ -31,38 +32,42 @@ function cellStatusText(status) {
   return "";
 }
 
+function headButton(name, title, onclick, className = "icon") {
+  const button = el("button", {
+    class: className,
+    type: "button",
+    title,
+    "aria-label": title,
+    onclick,
+  });
+  button.append(icon(name, { size: 14 }));
+  return button;
+}
+
 function renderHeader(cell, kind, geoai, generated) {
   const header = el("div", { class: "cell-header" });
   if (kind !== "markdown" && kind !== "tool" && cell.status !== "waiting_for_input") {
     if (cell.status === "running" && kind === "prompt") {
       header.append(
-        el("button", {
-          class: "run-btn stop",
-          text: "■",
-          title: "Stop",
-          onclick: () => act(() => stopCell(cell.id)),
-        })
+        headButton("stop", "Stop", () => act(() => stopCell(cell.id)), "run-btn stop")
       );
     } else {
-      header.append(
-        el("button", {
-          class: "run-btn",
-          text: "▶",
-          title: "Run",
-          onclick: () => act(() => runCell(cell.id)),
-        })
-      );
+      header.append(headButton("play", "Run", () => act(() => runCell(cell.id)), "run-btn"));
     }
+  } else {
+    // Keep the header's leading gutter stable across cell kinds and states.
+    header.append(el("span", { class: "run-slot" }));
   }
   header.append(
     el("span", {
       class: "counter",
       text: "In[" + (cell.execution_count != null ? cell.execution_count : " ") + "]",
     }),
-    el("span", { class: "badge", text: cellBadge(kind, geoai) })
+    el("span", { class: "badge badge-" + kind, text: cellBadge(kind, geoai) })
   );
   if (kind === "tool") {
     header.append(
+      icon("wrench", { size: 13, class: "tool-icon" }),
       el("span", { class: "agent-action-name", text: geoai.tool_name || "tool" }),
       el("span", {
         class: "agent-action-status status-" + (cell.status || "idle"),
@@ -72,54 +77,24 @@ function renderHeader(cell, kind, geoai, generated) {
   }
   header.append(el("span", { class: "spacer" }));
 
+  const actions = el("div", { class: "cell-actions" });
   if (kind === "markdown") {
     if (!generated) {
-      header.append(
-        el("button", {
-          class: "icon",
-          text: "edit",
-          title: "Edit",
-          onclick: () => editMarkdown(cell),
-        }),
-        el("button", {
-          class: "icon",
-          text: "✕",
-          title: "Delete",
-          onclick: () => act(() => deleteCell(cell.id)),
-        })
+      actions.append(
+        headButton("pencil", "Edit", () => editMarkdown(cell)),
+        headButton("trash-2", "Delete", () => act(() => deleteCell(cell.id)))
       );
     }
   } else if (kind === "tool") {
-    header.append(
-      el("button", {
-        class: "icon",
-        text: "✕",
-        title: "Delete",
-        onclick: () => deleteCell(cell.id),
-      })
-    );
+    actions.append(headButton("trash-2", "Delete", () => deleteCell(cell.id)));
   } else {
-    header.append(
-      el("button", {
-        class: "icon",
-        text: "↑",
-        title: "Move up",
-        onclick: () => act(() => moveCell(cell.id, -1)),
-      }),
-      el("button", {
-        class: "icon",
-        text: "↓",
-        title: "Move down",
-        onclick: () => act(() => moveCell(cell.id, 1)),
-      }),
-      el("button", {
-        class: "icon",
-        text: "✕",
-        title: "Delete",
-        onclick: () => deleteCell(cell.id),
-      })
+    actions.append(
+      headButton("chevron-up", "Move up", () => act(() => moveCell(cell.id, -1))),
+      headButton("chevron-down", "Move down", () => act(() => moveCell(cell.id, 1))),
+      headButton("trash-2", "Delete", () => deleteCell(cell.id))
     );
   }
+  header.append(actions);
   return header;
 }
 
@@ -136,6 +111,7 @@ function renderBody(cell, kind, geoai, source, generated) {
   } else {
     const ta = el("textarea", {
       rows: Math.min(12, Math.max(2, source.split("\n").length)),
+      spellcheck: "false",
     });
     ta.value = source;
     if (generated) {
@@ -144,14 +120,24 @@ function renderBody(cell, kind, geoai, source, generated) {
       ta.addEventListener("input", () => {
         const idx = state.cells.findIndex((c) => c.id === cell.id);
         if (idx >= 0) state.cells[idx].source = ta.value;
+        autoGrow(ta);
       });
       ta.addEventListener("blur", () => {
         act(() => updateCell(cell.id, ta.value));
       });
     }
     body.append(ta);
+    window.requestAnimationFrame(() => autoGrow(ta));
   }
   return body;
+}
+
+/** Grow a textarea to its content, capped so one cell cannot own the panel. */
+function autoGrow(ta) {
+  if (!ta || !ta.style) return;
+  ta.style.height = "auto";
+  const height = Number(ta.scrollHeight) || 0;
+  if (height) ta.style.height = Math.min(height, 360) + "px";
 }
 
 function renderOutputRow(cell, kind) {

@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,9 +33,14 @@ class FakeResponse:
     def __init__(self, body: bytes, *, content_length: str | None = None):
         self._body = body
         self._offset = 0
+        self.status = 200
         self.headers = {
-            "Content-Length": str(len(body)) if content_length is None else content_length
+            "Content-Length": str(len(body)) if content_length is None else content_length,
+            "Content-Type": "image/tiff",
         }
+
+    def geturl(self):
+        return "https://example.com/final.tif"
 
     def read(self, size: int = -1) -> bytes:
         if size < 0:
@@ -217,6 +223,48 @@ class DownloadTests(FilesTestCase):
             )
 
         self.assertEqual(list(self.workspace.data.iterdir()), [])
+
+    def test_check_url_reports_a_reachable_file_without_downloading_it(self):
+        seen = []
+
+        def opener(request, timeout=0):
+            seen.append((request.full_url, request.headers))
+            return FakeResponse(b"asset")
+
+        result = fileops.check_url("https://example.com/a.tif", opener=opener)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["content_length"], 5)
+        self.assertEqual(result["filename"], "final.tif")
+        self.assertEqual(result["content_type"], "image/tiff")
+        self.assertEqual(seen[0][0], "https://example.com/a.tif")
+
+    def test_check_url_reports_an_http_failure(self):
+        def opener(request, timeout=0):
+            raise urllib.error.HTTPError(
+                "https://example.com/a.tif", 404, "Not Found", {}, None
+            )
+
+        result = fileops.check_url("https://example.com/a.tif", opener=opener)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], 404)
+        self.assertIn("404", result["error"])
+
+    def test_check_url_refuses_a_non_http_url(self):
+        with self.assertRaises(ToolInputError):
+            fileops.check_url("ftp://example.com/a.tif")
+
+    def test_check_url_refuses_an_oversized_file(self):
+        response = FakeResponse(b"tiny", content_length=str(3 * 1024**3))
+
+        result = fileops.check_url(
+            "https://example.com/huge.tif", opener=self.opener(response)
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("2 GB cap", result["error"])
 
     def test_prepare_downloads_validates_input(self):
         with self.assertRaises(ToolInputError):

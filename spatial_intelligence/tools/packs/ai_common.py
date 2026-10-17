@@ -10,7 +10,7 @@ copy of it and a fix to the artifact handling lands for both.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Iterator
 
 import geopandas as gpd
 

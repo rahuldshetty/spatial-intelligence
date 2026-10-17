@@ -46,8 +46,3 @@ class EventBus:
                         self._subscribers.remove(subscriber)
                     except ValueError:
                         pass
-
-    def subscriber_count(self) -> int:
-        """How many consumers are currently connected."""
-        with self._lock:
-            return len(self._subscribers)

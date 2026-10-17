@@ -4,46 +4,93 @@
 
 .add-cell-row {
   display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: 0;
   flex-shrink: 0;
 }
 
 .add-cell-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   flex: 1;
-  padding: 9px 12px;
-  font-size: 13px;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--primary);
-  background: var(--primary-soft);
-  border: 1px dashed var(--primary-border);
-  border-radius: var(--radius);
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.add-cell-row button .icon {
+  color: var(--text-3);
 }
 
 .add-cell-row button:hover {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
+.add-cell-row button:hover .icon {
+  color: var(--primary);
 }
 
 .empty-hint {
-  padding: 32px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 46px 22px;
   text-align: center;
   color: var(--text-3);
   font-size: 13px;
+}
+
+.empty-icon {
+  color: var(--text-3);
+  opacity: 0.75;
+  margin-bottom: 2px;
+}
+
+.empty-title {
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.empty-detail {
+  max-width: 300px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .cell {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.cell:hover {
+  border-color: var(--border-strong);
+}
+
+.cell:focus-within {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
 .cell.generated-cell {
@@ -54,6 +101,10 @@
   background: var(--surface-2);
   color: var(--text-2);
   cursor: default;
+}
+
+.tool-icon {
+  color: var(--text-3);
 }
 
 .agent-action-name {
@@ -315,27 +366,37 @@
 .cell-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px 6px 10px;
+  gap: 7px;
+  padding: 5px 7px 5px 8px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
+  min-height: 38px;
+}
+
+.cell-header .run-btn,
+.cell-header .run-slot {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
 }
 
 .cell-header .run-btn {
-  width: 26px;
-  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--success);
   cursor: pointer;
-  font-size: 13px;
   line-height: 1;
-  transition: background 100ms ease;
+  transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
 }
 
 .cell-header .run-btn:hover {
   background: var(--success-soft);
+  border-color: var(--success);
 }
 
 .cell-header .run-btn.stop {
@@ -346,34 +407,71 @@
 
 .cell-header .counter {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-3);
 }
 
 .cell-header .badge {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.45px;
   color: var(--text-2);
   background: var(--surface-3);
   padding: 2px 7px;
   border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge-python {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.badge-prompt {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.badge-markdown {
+  color: var(--text-2);
+  background: var(--surface-3);
+}
+
+.badge-tool {
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .cell-header .spacer {
   flex: 1;
 }
 
+.cell-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
+.cell:hover .cell-actions,
+.cell:focus-within .cell-actions {
+  opacity: 1;
+}
+
 .cell-header button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text-3);
-  width: 24px;
-  height: 24px;
+  width: 25px;
+  height: 25px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
   transition: background 100ms ease, color 100ms ease;
 }
 
@@ -382,20 +480,27 @@
   color: var(--text);
 }
 
+.cell-header button.icon[title="Delete"]:hover {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
 .cell-body {
   padding: 10px 12px;
 }
 
 .cell-body textarea {
+  display: block;
   width: 100%;
   min-height: 46px;
   resize: vertical;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 9px 11px;
   font-family: var(--font-mono);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text);
   background: var(--surface);
   transition: border-color 120ms ease, box-shadow 120ms ease;
@@ -571,58 +676,4 @@
 
 .cell-out-block pre.error {
   color: var(--error);
-}
-
-/* -- job progress (generic aliases of the download-* progress styles) ----- */
-
-.job-body {
-  padding: 12px;
-}
-
-.job-description,
-.job-progress-label {
-  color: var(--text-2);
-  font-size: 12px;
-}
-
-.job-description {
-  margin-bottom: 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.job-progress {
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-3);
-}
-
-.job-progress-fill {
-  width: 0;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--primary);
-  transition: width 0.2s ease;
-}
-
-.job-progress.indeterminate .job-progress-fill {
-  animation: job-progress 1.2s ease-in-out infinite;
-}
-
-.job-progress-label {
-  margin-top: 6px;
-  font-family: var(--font-mono);
-}
-
-.job-error {
-  margin-top: 8px;
-  color: var(--error);
-  font-size: 12px;
-}
-
-@keyframes job-progress {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(285%); }
 }

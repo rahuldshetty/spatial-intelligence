@@ -38,6 +38,22 @@ export function buildField(field, options = {}) {
     return { group, read: () => input.value.trim() };
   }
 
+  if (field.type === "textarea") {
+    const input = el("textarea", {
+      rows: "4",
+      placeholder: field.placeholder || "",
+    });
+    input.value =
+      disabled && answers[field.id] != null
+        ? String(answers[field.id])
+        : field.default == null
+          ? ""
+          : String(field.default);
+    input.disabled = disabled;
+    group.append(input);
+    return { group, read: () => input.value.trim() };
+  }
+
   if (field.type === "confirmation") {
     const input = el("input", { type: "checkbox" });
     input.checked = disabled ? Boolean(answers[field.id]) : Boolean(field.default);
@@ -584,12 +600,16 @@ function buildAoi(group, field, { disabled }) {
   showBtn.disabled = disabled;
   // The map's own GeoEditor is the drawing tool; the bridge cannot open it (no
   // such command), so the wizard points at it instead of pretending to.
-  const mapHint = el("p", {
-    class: "wizard-hint",
-    text:
-      "To draw it: click the GeoEditor tool in the map toolbar, sketch the area, press Save, " +
-      "then come back here and press Use drawn shape. The map stays usable beside this panel.",
-  });
+  const mapHelp = el("div", { class: "aoi-map-help" });
+  mapHelp.append(
+    el("strong", { text: "Draw the area on the map" }),
+    el("ol", {}, [
+      el("li", { text: "Pick the GeoEditor tool in the map toolbar." }),
+      el("li", { text: "Sketch the area, then press Save there." }),
+      el("li", { text: "Return here and press Use drawn shape." }),
+    ]),
+    el("small", { text: "The map stays live beside this panel while you choose." })
+  );
   //: Id of the preview layer this widget pushed onto the map, so the next
   //: preview replaces it instead of stacking layers.
   let previewLayer = "";
@@ -676,11 +696,21 @@ function buildAoi(group, field, { disabled }) {
   const mapRow = el("div", { class: "aoi-row" });
   mapRow.append(viewBtn, drawnBtn, showBtn);
   showBtn.addEventListener("click", showOnMap);
-  paneMap.append(mapRow, mapStatus, mapHint);
+  paneMap.append(mapRow, mapStatus, mapHelp);
   paneMap.dataset.mode = "view";
 
   select(pane);
-  group.append(modes, panePlace, paneBbox, paneMap);
+  group.append(
+    el("p", {
+      class: "aoi-note",
+      text:
+        "The area bounds the imagery the workflow searches and clips. Pick whichever input is easiest; you can refine it later.",
+    }),
+    modes,
+    panePlace,
+    paneBbox,
+    paneMap
+  );
   return () => resolved;
 }
 

@@ -131,8 +131,59 @@ export async function importFiles(fileList) {
   return response.json();
 }
 
-export function importUrl(url) {
-  return request("POST", "/api/import/url", { url, filename: null });
+/**
+ * Upload files with byte progress.
+ *
+ * The regular :func:`importFiles` is fine when nothing is watching; a wizard
+ * that reports per-item progress needs the upload's loaded/total counters,
+ * which only ``XMLHttpRequest`` exposes.
+ */
+export function importFilesWithProgress(fileList, onProgress) {
+  const form = new FormData();
+  for (const file of fileList) {
+    form.append("files", file, file.webkitRelativePath || file.name);
+  }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/import/local");
+    xhr.responseType = "json";
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!onProgress || !event.lengthComputable || !event.total) return;
+      onProgress(Math.min(1, event.loaded / event.total));
+    });
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response || {});
+        return;
+      }
+      const payload = xhr.response;
+      reject(
+        new Error(
+          (payload && payload.detail) || "import failed (" + xhr.status + ")"
+        )
+      );
+    };
+    xhr.onerror = () => reject(new Error("upload failed"));
+    xhr.onabort = () => reject(new Error("upload cancelled"));
+    xhr.send(form);
+  });
+}
+
+export function importUrl(url, filename = null) {
+  return request("POST", "/api/import/url", { url, filename });
+}
+
+export function deleteWorkspaceFile(path) {
+  return request("POST", "/api/files/delete", { path });
+}
+
+export function renameWorkspaceFile(path, name) {
+  return request("POST", "/api/files/rename", { path, name });
+}
+
+/** Ask the server whether a URL can be downloaded before creating a workspace. */
+export function checkImportUrl(url) {
+  return request("POST", "/api/import/check", { url });
 }
 
 export function setMapProject(project) {

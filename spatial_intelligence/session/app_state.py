@@ -31,11 +31,6 @@ from .runs import RunQueue
 from .services import SessionServices
 from .workspace_session import WorkspaceSession
 
-#: Settings a PUT may patch.
-PATCHABLE_SETTINGS = frozenset(
-    {"model", "theme", "dangerous_mode", "max_retries", "record_agent_steps"}
-)
-
 
 class AppState:
     """Single-owner state for the running server."""
@@ -189,23 +184,6 @@ class AppState:
             raise
         return self.snapshot()
 
-    def apply_workflow(self, workflow_id: str, params: dict) -> dict:
-        """Seed a workflow's answers into the open workspace as its cells.
-
-        The workflow only decides which cells exist and what the prompt says:
-        running it is still an ordinary prompt cell, so the agent, the run
-        queue, traces, and progress are untouched.
-        """
-        with self.lock:
-            workspace = self.workspaces.workspace
-            if workspace is None:
-                raise ToolInputError("open a workspace before adding a workflow")
-            spec = workflows.get(workflow_id)
-            workflows.seed(
-                workspace, self.notebook, spec, params, verdict=self._model_verdict
-            )
-            return self.snapshot()
-
     def model_profile(self, model_ref: str, task: str = "") -> dict:
         """Describe one candidate model, for the wizard's up-front check."""
         profile = profiles.resolve(
@@ -349,12 +327,51 @@ class AppState:
             workspace = self._require_workspace()
             name = filename or filename_from_url(url)
             job = self.jobs.reporter().job("download", name, unit="bytes")
-            with job:
-                path = download_file(workspace, url, name, job=job)
-                relative = workspace.relative(path)
-                job.done(artifact=relative)
+        # The network transfer must not hold the session lock: a slow download
+        # would otherwise block /api/state and every other request for its whole
+        # duration (and make a URL served by this same app deadlock).
+        with job:
+            path = download_file(workspace, url, name, job=job)
+            relative = workspace.relative(path)
+            job.done(artifact=relative)
+        with self.lock:
             self.bus.publish("files", {"files": self.list_files()})
             return {"path": relative}
+
+    def delete_file(self, path: str) -> dict:
+        """Delete a user file and drop any map layer that served it."""
+        from ..map.layers import remove_local_sources
+        from ..workspace import files as fileops
+
+        with self.lock:
+            workspace = self._require_workspace()
+            relative = fileops.delete_file(workspace, path)
+            removed = remove_local_sources(self.workspaces.map, workspace, relative)
+            if removed:
+                self.workspaces.save_map()
+                self.bus.publish("map", {"project": self.workspaces.project()})
+            self.bus.publish("files", {"files": self.list_files()})
+            return self.snapshot()
+
+    def rename_file(self, path: str, name: str) -> dict:
+        """Rename a user file and re-point the layers that served it."""
+        from ..map.layers import rename_local_sources
+        from ..workspace import files as fileops
+
+        with self.lock:
+            workspace = self._require_workspace()
+            old_rel, new_rel = fileops.rename_file(workspace, path, name)
+            changed = 0
+            runtime = self.services.runtime
+            if runtime is not None and old_rel != new_rel:
+                changed = rename_local_sources(
+                    self.workspaces.map, workspace, old_rel, new_rel, runtime.file_url
+                )
+            if changed:
+                self.workspaces.save_map()
+                self.bus.publish("map", {"project": self.workspaces.project()})
+            self.bus.publish("files", {"files": self.list_files()})
+            return self.snapshot()
 
     def list_files(self) -> list[str]:
         """List workspace files."""

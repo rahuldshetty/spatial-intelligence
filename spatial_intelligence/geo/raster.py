@@ -992,7 +992,7 @@ def contour(
                 xs, ys = rasterio.transform.xy(
                     src.transform, segment[:, 0], segment[:, 1], offset="center"
                 )
-                line = LineString(list(zip(xs, ys)))
+                line = LineString(list(zip(xs, ys, strict=True)))
                 if tolerance > 0:
                     line = line.simplify(tolerance)
                 features.append(

@@ -2,11 +2,13 @@
 
 "use strict";
 
-import { getState } from "./api.js";
+import { getState, runAll, runCell, saveWorkspace } from "./api.js";
 import { closeAllMenus } from "./components/menubar.js";
 import { revealInteraction } from "./components/interaction.js";
 import { updateJobNode } from "./components/progress.js";
-import { refreshStatusBar } from "./components/status-bar.js";
+import { refreshStatusBar, setConnection } from "./components/status-bar.js";
+import { openSettingsDialog } from "./components/settings-dialog.js";
+import { closeDialog, toast } from "./dom.js";
 import { applyTrace, flushPendingTrace, repaintTrace } from "./components/trace.js";
 import { connectEvents } from "./events.js";
 import { renderCellsOnly } from "./pages/cells.js";
@@ -21,6 +23,7 @@ export function boot() {
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".menu")) closeAllMenus();
   });
+  document.addEventListener("keydown", handleShortcut);
   connectEvents({
     onCell: handleCell,
     onTrace: handleTrace,
@@ -29,8 +32,41 @@ export function boot() {
     onMap: handleMap,
     onFiles: handleFiles,
     onSettings: handleSettings,
+    onStatus: setConnection,
   });
   loadState();
+}
+
+function handleShortcut(event) {
+  if (event.key === "Escape") {
+    closeAllMenus();
+    closeDialog();
+    return;
+  }
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const key = event.key.toLowerCase();
+  if (key === "s") {
+    event.preventDefault();
+    if (!state.active_workspace) {
+      toast("No workspace open", "warning");
+      return;
+    }
+    saveWorkspace()
+      .then(() => toast("Workspace saved", "success"))
+      .catch((error) => toast(error.message || String(error), "error"));
+  } else if (event.key === ",") {
+    event.preventDefault();
+    openSettingsDialog();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    if (event.shiftKey) {
+      runAll().catch((error) => toast(error.message || String(error), "error"));
+      return;
+    }
+    const cell = document.activeElement && document.activeElement.closest(".cell");
+    const cellId = cell && cell.getAttribute("data-cell-id");
+    if (cellId) runCell(cellId).catch((error) => toast(error.message || String(error), "error"));
+  }
 }
 
 async function loadState() {

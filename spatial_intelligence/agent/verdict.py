@@ -24,9 +24,6 @@ from pydantic_ai import Agent
 
 from .model import resolve_model
 
-#: Tasks a verdict may name. Anything else is treated as "no fit".
-TASKS = ("segmentation", "detection", "classification")
-
 SYSTEM_PROMPT = """\
 You judge whether a machine-learning checkpoint can do a geospatial task before
 the user waits for a run. You are given facts from its Hugging Face repository.

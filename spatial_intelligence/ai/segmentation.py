@@ -27,7 +27,6 @@ from typing import Any, Sequence
 
 import geopandas as gpd
 import numpy as np
-import rasterio
 import shapely
 from rasterio.features import shapes
 from rasterio.windows import Window

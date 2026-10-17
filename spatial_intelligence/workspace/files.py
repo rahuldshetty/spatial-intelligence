@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import time
+import urllib.error
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -45,10 +46,97 @@ MIN_READ_BYTES = 16_000
 _USER_AGENT = "spatial-intelligence/0.1"
 _HTTPS_SCHEMES = ("http://", "https://")
 
+#: Files the harness owns: the notebook, the manifest, and the live map state.
+#: They are never listed for rename/delete in the Data tab.
+HARNESS_FILES = frozenset(
+    {"notebook.ipynb", "workspace.json", "maps/current.geolibre.json"}
+)
+#: Directories the harness owns wholesale (run traces).
+HARNESS_PREFIXES = ("traces/",)
+
+
+def is_harness_file(path: str) -> bool:
+    """Whether ``path`` is application state rather than a user file."""
+    rel = str(path or "").replace("\\", "/").lstrip("/")
+    return (
+        rel in HARNESS_FILES
+        or rel == "traces"
+        or any(rel.startswith(prefix) for prefix in HARNESS_PREFIXES)
+    )
+
+
+def _normalize_rel(path: str) -> str:
+    return str(path or "").replace("\\", "/").lstrip("/")
+
+
+def _prune_empty_dirs(workspace: Workspace, start: Path) -> None:
+    """Remove empty directories left by a delete, stopping at layout roots."""
+    stops = {
+        workspace.data.resolve(),
+        workspace.results.resolve(),
+        workspace.maps.resolve(),
+        workspace.root.resolve(),
+    }
+    current = start.resolve()
+    while current not in stops:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
 
 def filename_from_url(url: str) -> str:
     """Derive a download filename from a URL path, with a safe fallback."""
     return Path(urlparse(url).path).name or "download"
+
+
+def check_url(url: str, *, timeout: float = 10.0, opener=None) -> dict:
+    """Check that a URL is reachable before a workspace is created.
+
+    The check runs on the server, so it is not subject to the browser's CORS
+    rules. It opens a normal GET and reads one byte, then closes the response:
+    enough to prove the host answers and to read the size headers without
+    downloading the file twice during setup.
+    """
+    if not url.startswith(_HTTPS_SCHEMES):
+        raise ToolInputError("download URLs must use http:// or https://")
+    if opener is None:
+        opener = urllib.request.urlopen
+    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    try:
+        with opener(request, timeout=timeout) as response:
+            response.read(1)
+            final_url = response.geturl() if hasattr(response, "geturl") else url
+            total = _content_length(response)
+            if total is not None and total > MAX_DOWNLOAD_BYTES:
+                return {
+                    "ok": False,
+                    "url": url,
+                    "final_url": final_url,
+                    "error": f"file exceeds the 2 GB cap ({total} bytes)",
+                }
+            status = getattr(response, "status", None)
+            if status is None and hasattr(response, "getcode"):
+                status = response.getcode()
+            return {
+                "ok": True,
+                "url": url,
+                "final_url": final_url,
+                "status": status,
+                "content_type": response.headers.get("Content-Type"),
+                "content_length": total,
+                "filename": filename_from_url(final_url or url),
+            }
+    except urllib.error.HTTPError as exc:
+        return {
+            "ok": False,
+            "url": url,
+            "status": exc.code,
+            "error": f"HTTP {exc.code} {exc.reason}",
+        }
+    except Exception as exc:  # DNS, TLS, timeout, connection reset
+        return {"ok": False, "url": url, "error": str(exc) or type(exc).__name__}
 
 
 def list_files(workspace: Workspace, subdir: str = "", pattern: str = "*") -> list[str]:
@@ -149,6 +237,58 @@ def import_path(workspace: Workspace, source: str, dest_name: str | None = None)
     else:
         shutil.copy2(resolved_source, dest)
     return dest
+
+
+def delete_file(workspace: Workspace, path: str) -> str:
+    """Delete one user file and prune any directory the delete emptied.
+
+    Harness-owned state (notebook, manifest, map snapshot, traces) is refused;
+    so is anything outside the writable ``data/``, ``results/``, or ``maps/``
+    trees. Returns the workspace-relative path that was removed.
+    """
+    rel = _normalize_rel(path)
+    if is_harness_file(rel):
+        raise ToolInputError(f"{rel!r} is managed by the app and cannot be deleted")
+    target = workspace.resolve(rel, must_exist=True, write=True)
+    if not target.is_file():
+        raise ToolInputError(f"only files can be deleted: {rel!r}")
+    target.unlink()
+    workspace.forget_output(rel)
+    _prune_empty_dirs(workspace, target.parent)
+    return rel
+
+
+def rename_file(workspace: Workspace, path: str, name: str) -> tuple[str, str]:
+    """Rename one user file within its directory.
+
+    Only a file name is accepted, not a path: moving files between workspace
+    directories is not part of this operation. Returns ``(old, new)`` relative
+    paths. Harness-owned state is refused, as are existing destination names.
+    """
+    rel = _normalize_rel(path)
+    if is_harness_file(rel):
+        raise ToolInputError(f"{rel!r} is managed by the app and cannot be renamed")
+    source = workspace.resolve(rel, must_exist=True, write=True)
+    if not source.is_file():
+        raise ToolInputError(f"only files can be renamed: {rel!r}")
+    clean = str(name or "").strip()
+    if not clean or clean in {".", ".."}:
+        raise ToolInputError("a file name is required")
+    if any(separator in clean for separator in ("/", "\\", "\x00")):
+        raise ToolInputError("a file name cannot contain a path separator")
+    destination = workspace.resolve_under(source.parent, clean)
+    if destination != source and destination.exists():
+        same = False
+        try:
+            same = destination.samefile(source)
+        except OSError:
+            same = False
+        if not same:
+            raise ToolInputError(f"a file named {clean!r} already exists")
+    source.rename(destination)
+    new_rel = workspace.relative(destination)
+    workspace.move_output(rel, new_rel)
+    return rel, new_rel
 
 
 def unique_names(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:

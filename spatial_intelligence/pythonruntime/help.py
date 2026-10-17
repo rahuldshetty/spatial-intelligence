@@ -69,10 +69,12 @@ def roots() -> dict:
 VISION_DOC = (
     "Image-input helper available in run_python.\n"
     "  vision.supported -> bool   (a property: use it without parentheses)\n"
-    "  vision.ask(question, image='map', max_side=1400) -> str\n"
+    "  vision.ask(question, image='map', max_side=1400, bands=None) -> str\n"
     "      image is 'map' (the current GeoLibre viewport) or a workspace path\n"
     "      to a PNG/JPEG/GeoTIFF. Returns the model's answer; use JSON in the\n"
-    "      question if the snippet needs boxes. Rasters are downsampled.\n"
+    "      question if the snippet needs boxes. Rasters are downsampled and\n"
+    "      converted to RGB JPEG; bands picks the 1-based R,G,B channels\n"
+    "      (default first three), e.g. bands=[4,3,2].\n"
     "Only available when the configured endpoint and model accept images."
 )
 

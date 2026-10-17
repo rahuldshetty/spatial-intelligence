@@ -119,8 +119,18 @@ class _VisionFacade:
         service = self._services.get(VISION_SERVICE)
         return bool(service is not None and service.supported)
 
-    def ask(self, question: str, image: str = "map", max_side: int = 1400) -> str:
-        """Ask one question about ``image`` ("map" or a workspace path)."""
+    def ask(
+        self,
+        question: str,
+        image: str = "map",
+        max_side: int = 1400,
+        bands: list[int] | None = None,
+    ) -> str:
+        """Ask one question about ``image`` ("map" or a workspace path).
+
+        ``bands`` picks the raster channels in R, G, B order (1-based); it is
+        ignored for photos and rejected for the live map capture.
+        """
         service = self._services.get(VISION_SERVICE)
         if service is None:
             raise ToolInputError(
@@ -138,6 +148,10 @@ class _VisionFacade:
         limit = max(256, min(int(max_side), 2048))
         source = (image or "map").strip()
         if source == "map":
+            if bands:
+                raise ToolInputError(
+                    "bands only applies to a raster image, not the live map capture"
+                )
             broker = self._services.get(CAPTURE_SERVICE)
             if broker is None:
                 raise ToolInputError("the map capture service is not available")
@@ -145,7 +159,7 @@ class _VisionFacade:
             data, _, _ = encode_capture(capture.image, limit)
         else:
             path = self._workspace.resolve(source, must_exist=True)
-            data, _, _, _, _ = load_image(path, limit)
+            data, _, _, _, _, _ = load_image(path, limit, bands)
         return service.ask(question, data, "image/jpeg")
 
 

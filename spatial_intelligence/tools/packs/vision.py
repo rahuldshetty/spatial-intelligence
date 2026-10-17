@@ -33,15 +33,19 @@ class VisionPack:
         question: str,
         source: str = "map",
         max_side: int = 1400,
+        bands: list[int] | None = None,
     ) -> ToolReturn:
         """Look at the live map or a workspace image and answer a question about it.
 
         ``source="map"`` captures exactly what the GeoLibre map canvas is showing
         now — the current viewport, without toolbar, legend, or scale bar — and
         passes it with the view bounds. ``source`` may instead be a workspace
-        path to a PNG/JPEG/WebP or a GeoTIFF; a raster is downsampled and
-        percentile-stretched (first three bands) for viewing. ``question`` is what
-        you want read from the image.
+        path to a PNG/JPEG/WebP or a GeoTIFF; a raster is downsampled,
+        percentile-stretched, and converted to an RGB JPEG. ``bands`` selects the
+        raster channels in R, G, B order (1-based); it defaults to the first
+        three bands. Pass it when the raster is not true-colour, e.g.
+        ``bands=[4, 3, 2]``. A one-band raster is rendered as grayscale.
+        ``question`` is what you want read from the image.
 
         Use this for "what do you see", layer/layout checks, or approximate
         visual boxes. For precise measurements or geometry, use the raster and
@@ -56,6 +60,10 @@ class VisionPack:
         source = (source or "map").strip()
 
         if source == "map":
+            if bands:
+                raise ToolInputError(
+                    "bands only applies to a raster source; the map capture is already RGB"
+                )
             broker = self._rt.services.get(CAPTURE_SERVICE)
             if broker is None:
                 raise ToolInputError("the map capture service is not available")
@@ -77,12 +85,26 @@ class VisionPack:
             )
         else:
             path = self._rt.workspace.resolve(source, must_exist=True)
-            data, width, height, original_width, original_height = load_image(path, limit)
+            data, width, height, original_width, original_height, selected = load_image(
+                path, limit, bands
+            )
+            if path.suffix.lower() in {".tif", ".tiff", ".img", ".vrt", ".jp2"}:
+                conversion = (
+                    f"Converted to an RGB JPEG from bands {selected} "
+                    "(2nd–98th percentile per band)"
+                )
+            else:
+                conversion = "Converted to an RGB JPEG"
             detail = (
                 f"Attached: {self._rt.workspace.relative(path)} "
-                f"({original_width}x{original_height}), shown at {width}x{height}. "
-                "Multiband rasters are percentile-stretched to RGB."
+                f"({original_width}x{original_height}), {conversion}, "
+                f"shown at {width}x{height}."
             )
+            if min(original_width, original_height) < 512:
+                detail += (
+                    " The source is small; individual small objects may span only "
+                    "a few pixels."
+                )
 
         return ToolReturn(
             detail,

@@ -66,9 +66,8 @@ function stepsSection(cell) {
   }
   const trace = el("div", { class: "trace trace-modal-trace" });
   trace.append(...nodes);
-  trace.querySelectorAll("details").forEach((details) => {
-    details.open = true;
-  });
+  // Tool input/output stays folded; the step summary is the index. Long
+  // reasoning text still opens in full for review.
   trace.querySelectorAll(".trace-more").forEach((button) => {
     button.click();
   });

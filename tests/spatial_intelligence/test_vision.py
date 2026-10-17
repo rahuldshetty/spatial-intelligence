@@ -10,6 +10,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+import rasterio
 from PIL import Image
 from pydantic_ai import BinaryContent, ToolReturn
 
@@ -275,6 +277,56 @@ class VisionToolTests(unittest.TestCase):
         )
         self.assertIn("data/shot.png", result.return_value)
         self.assertIn("1200x600", result.return_value)
+
+    def test_a_raster_can_select_its_rgb_bands(self):
+        path = self.workspace.data / "false_color.tif"
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            width=16,
+            height=16,
+            count=4,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=rasterio.transform.from_origin(0, 1, 0.01, 0.01),
+        ) as dataset:
+            for band in range(1, 5):
+                dataset.write(
+                    np.full((16, 16), band * 50, dtype="uint8"), band
+                )
+
+        result = VisionPack(self.runtime()).analyze_image(
+            "describe it", source="data/false_color.tif", bands=[4, 2, 3]
+        )
+
+        self.assertIn("bands [4, 2, 3]", result.return_value)
+        self.assertIn("Converted to an RGB JPEG", result.return_value)
+        self.assertIsInstance(result.content[0], BinaryContent)
+
+    def test_an_out_of_range_band_is_rejected(self):
+        path = self.workspace.data / "three_band.tif"
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            width=8,
+            height=8,
+            count=3,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=rasterio.transform.from_origin(0, 1, 0.01, 0.01),
+        ) as dataset:
+            dataset.write(np.zeros((3, 8, 8), dtype="uint8"))
+
+        with self.assertRaises(ToolInputError):
+            VisionPack(self.runtime()).analyze_image(
+                "describe", source="data/three_band.tif", bands=[4]
+            )
+
+    def test_bands_are_rejected_for_the_map_capture(self):
+        with self.assertRaises(ToolInputError):
+            VisionPack(self.runtime()).analyze_image("describe", bands=[1, 2, 3])
 
     def test_the_tool_is_registered_only_when_supported(self):
         supported = default_registry(self.runtime(True))

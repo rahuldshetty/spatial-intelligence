@@ -757,6 +757,9 @@ class TraceModalTests(WebRenderingTestCase):
             "  stats: dialog.querySelectorAll('.trace-stat').length,"
             "  text: dialog.textContent,"
             "  steps: trace ? trace.querySelectorAll('.trace-step').length : 0,"
+            "  toolDetails: trace ? trace.querySelectorAll('details.trace-step.tool-call').length : 0,"
+            "  openToolDetails: trace ? [...trace.querySelectorAll('details.trace-step.tool-call')]"
+            "    .filter((details) => details.getAttribute('open') !== null).length : 0,"
             "};",
             marked=True,
         )
@@ -768,6 +771,8 @@ class TraceModalTests(WebRenderingTestCase):
         self.assertIn("openai:test", rendered["text"])
         self.assertIn("list_files", rendered["text"])
         self.assertGreaterEqual(rendered["steps"], 2)
+        self.assertEqual(rendered["toolDetails"], 1)
+        self.assertEqual(rendered["openToolDetails"], 0)
 
 
 class DataTabRenderingTests(WebRenderingTestCase):

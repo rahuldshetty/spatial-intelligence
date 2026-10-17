@@ -39,25 +39,39 @@ def encode_capture(data: bytes, max_side: int) -> tuple[bytes, int, int]:
         raise ToolInputError(f"could not read the map capture: {exc}") from exc
 
 
-def _from_raster(path: Path, max_side: int) -> tuple[Image.Image, int, int]:
-    """Read a raster (first three bands) and percentile-stretch it for viewing."""
+def _from_raster(
+    path: Path,
+    max_side: int,
+    bands: list[int] | None = None,
+) -> tuple[Image.Image, int, int, list[int]]:
+    """Read a raster (selected bands, default first three) for viewing."""
     import rasterio
     from rasterio.enums import Resampling
 
     with rasterio.open(path) as dataset:
         original_width, original_height = dataset.width, dataset.height
+        if bands:
+            indices = [int(value) for value in bands]
+            if len(indices) not in (1, 2, 3):
+                raise ToolInputError("bands must contain one, two, or three band numbers")
+            if any(value < 1 or value > dataset.count for value in indices):
+                raise ToolInputError(
+                    f"bands must be between 1 and {dataset.count} for {path.name}"
+                )
+        else:
+            indices = list(range(1, min(dataset.count, 3) + 1))
+        if not indices:
+            raise ToolInputError(f"{path.name} has no raster bands")
         scale = max(1, int(np.ceil(max(original_width, original_height) / max_side)))
         height = max(1, original_height // scale)
         width = max(1, original_width // scale)
-        count = min(dataset.count, 3)
-        if count == 0:
-            raise ToolInputError(f"{path.name} has no raster bands")
-        bands = dataset.read(
-            list(range(1, count + 1)),
+        count = len(indices)
+        pixels = dataset.read(
+            indices,
             out_shape=(count, height, width),
             resampling=Resampling.average,
         )
-    array = np.moveaxis(bands, 0, -1).astype(np.float32)
+    array = np.moveaxis(pixels, 0, -1).astype(np.float32)
     if array.ndim == 2:
         array = array[:, :, np.newaxis]
     if array.shape[2] == 1:
@@ -76,27 +90,37 @@ def _from_raster(path: Path, max_side: int) -> tuple[Image.Image, int, int]:
         Image.fromarray(stretched.astype(np.uint8), mode="RGB"),
         original_width,
         original_height,
+        indices,
     )
 
 
-def load_image(path: Path, max_side: int) -> tuple[bytes, int, int, int, int]:
-    """Return JPEG bytes, displayed size, and source raster size."""
+def load_image(
+    path: Path,
+    max_side: int,
+    bands: list[int] | None = None,
+) -> tuple[bytes, int, int, int, int, list[int]]:
+    """Return JPEG bytes, displayed size, source size, and selected bands."""
     suffix = path.suffix.lower()
     if suffix not in IMAGE_SUFFIXES:
         raise ToolInputError(
             f"unsupported image type {suffix or '(none)'}; use PNG, JPEG, WebP, or a GeoTIFF"
         )
     if suffix in RASTER_SUFFIXES:
-        image, original_width, original_height = _from_raster(path, max_side)
+        image, original_width, original_height, selected = _from_raster(
+            path, max_side, bands
+        )
     else:
+        if bands:
+            raise ToolInputError("bands only applies to multiband rasters, not photos")
         try:
             with Image.open(path) as source:
                 image = source.convert("RGB")
                 original_width, original_height = source.size
         except Exception as exc:  # noqa: BLE001 - surfaces as a tool failure
             raise ToolInputError(f"could not read {path.name}: {exc}") from exc
+        selected = [1, 2, 3]
     data, width, height = encode_jpeg(image, max_side)
-    return data, width, height, original_width, original_height
+    return data, width, height, original_width, original_height, selected
 
 
 __all__ = [

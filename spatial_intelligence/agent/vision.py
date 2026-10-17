@@ -80,6 +80,20 @@ def _payload(endpoint: OpenAIEndpoint, question: str, data_uri: str, *, max_toke
     }
 
 
+def _is_deepseek(endpoint: OpenAIEndpoint) -> bool:
+    """Whether the endpoint is DeepSeek's OpenAI-compatible API."""
+    return "deepseek" in endpoint.base_url.lower() or endpoint.model.lower().startswith(
+        "deepseek"
+    )
+
+
+def _thinking_payload(endpoint: OpenAIEndpoint, thinking: bool) -> dict:
+    """DeepSeek's direct-answer switch; other providers do not know the field."""
+    if not _is_deepseek(endpoint):
+        return {}
+    return {"thinking": {"type": "enabled" if thinking else "disabled"}}
+
+
 def _endpoint_url(endpoint: OpenAIEndpoint) -> str:
     route = "/responses" if endpoint.api == "responses" else "/chat/completions"
     return endpoint.base_url.rstrip("/") + route
@@ -236,8 +250,15 @@ class VisionService:
         media_type: str = "image/jpeg",
         *,
         timeout: float = ASK_TIMEOUT,
+        thinking: bool = False,
+        max_tokens: int = 2048,
     ) -> str:
-        """Ask the configured model one question about one image."""
+        """Ask the configured model one question about one image.
+
+        ``thinking`` is DeepSeek's reasoning switch and is ignored for other
+        providers. It defaults off so a bounding-box or JSON answer is not lost
+        when the model spends its entire output budget on reasoning.
+        """
         endpoint = openai_endpoint(self._model)
         if endpoint is None:
             raise ToolInputError(
@@ -249,7 +270,13 @@ class VisionService:
             raise ToolInputError(
                 "image input is not available for this model: " + detail
             )
-        payload = _payload(endpoint, question, _data_uri(data, media_type), max_tokens=1024)
+        payload = _payload(
+            endpoint,
+            question,
+            _data_uri(data, media_type),
+            max_tokens=max(1, int(max_tokens)),
+        )
+        payload.update(_thinking_payload(endpoint, thinking))
         try:
             response = httpx.post(
                 _endpoint_url(endpoint),
@@ -265,9 +292,25 @@ class VisionService:
                 f"{response.text[:300]}"
             )
         try:
-            return _extract_text(response.json())
+            data = response.json()
         except Exception as exc:  # noqa: BLE001
             raise ToolInputError(f"vision response was not JSON: {exc}") from exc
+        text = _extract_text(data)
+        if text.strip():
+            return text
+        choice = (data.get("choices") or [{}])[0]
+        finish = choice.get("finish_reason") or "unknown"
+        message = choice.get("message") or {}
+        reasoning = message.get("reasoning_content") or ""
+        if finish == "length" and reasoning:
+            raise ToolInputError(
+                "the vision model spent its whole output budget on reasoning and "
+                "returned no answer; disable thinking for direct box/JSON answers "
+                "or raise max_tokens"
+            )
+        raise ToolInputError(
+            f"the vision model returned no text (finish_reason={finish})"
+        )
 
 
 def _probe(model: str) -> tuple[str, str]:
@@ -277,6 +320,7 @@ def _probe(model: str) -> tuple[str, str]:
         return "unsupported", "Only OpenAI-compatible models can be probed."
     data_uri = _data_uri(_probe_png(), "image/png")
     payload = _payload(endpoint, "Reply with OK.", data_uri, max_tokens=16)
+    payload.update(_thinking_payload(endpoint, False))
     try:
         response = httpx.post(
             _endpoint_url(endpoint),

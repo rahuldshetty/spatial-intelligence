@@ -48,9 +48,11 @@ class VisionPack:
         ``question`` is what you want read from the image.
 
         Use this for "what do you see", layer/layout checks, or approximate
-        visual boxes. For precise measurements or geometry, use the raster and
-        vector tools instead; the image is only the visible viewport, not the
-        whole dataset.
+        visual boxes. For strict JSON/box output from a reasoning model, prefer
+        run_python ``vision.ask(...)``: it calls the vision endpoint directly
+        with thinking off by default, so the answer is not lost to reasoning.
+        For precise measurements or geometry, use the raster and vector tools
+        instead; the image is only the visible viewport, not the whole dataset.
         """
         self._require()
         question = (question or "").strip()

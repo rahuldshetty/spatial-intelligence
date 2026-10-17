@@ -45,6 +45,86 @@ def png_bytes(width: int = 12, height: int = 10) -> bytes:
     return buffer.getvalue()
 
 
+class VisionAskTests(unittest.TestCase):
+    def _service(self, model: str, base_url: str) -> VisionService:
+        with patch.dict(
+            os.environ,
+            {"OPENAI_BASE_URL": base_url, "OPENAI_API_KEY": "test-key"},
+        ):
+            service = VisionService(model, enabled=True)
+        service._state = "supported"
+        return service
+
+    def test_deepseek_direct_mode_is_sent_without_thinking(self):
+        service = self._service(
+            "openai:deepseek-flash", "https://api.deepseek.com"
+        )
+        response = FakeResponse(
+            200,
+            "{}",
+            {
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": "red"}}
+                ]
+            },
+        )
+        with patch("spatial_intelligence.agent.vision.httpx.post", return_value=response) as post:
+            with patch.dict(
+                os.environ,
+                {"OPENAI_BASE_URL": "https://api.deepseek.com", "OPENAI_API_KEY": "test-key"},
+            ):
+                self.assertEqual(service.ask("what color?", png_bytes()), "red")
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
+
+    def test_openai_does_not_receive_deepseek_thinking(self):
+        service = self._service("openai:gpt-4o", "https://api.openai.com/v1")
+        response = FakeResponse(
+            200,
+            "{}",
+            {
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": "red"}}
+                ]
+            },
+        )
+        with patch("spatial_intelligence.agent.vision.httpx.post", return_value=response) as post:
+            with patch.dict(
+                os.environ,
+                {"OPENAI_BASE_URL": "", "OPENAI_API_KEY": "test-key"},
+            ):
+                service.ask("what color?", png_bytes())
+        self.assertNotIn("thinking", post.call_args.kwargs["json"])
+
+    def test_reasoning_exhaustion_is_reported_not_returned_as_empty(self):
+        service = self._service(
+            "openai:deepseek-flash", "https://api.deepseek.com"
+        )
+        response = FakeResponse(
+            200,
+            "{}",
+            {
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {
+                            "content": "",
+                            "reasoning_content": "thinking about boxes",
+                        },
+                    }
+                ]
+            },
+        )
+        with patch("spatial_intelligence.agent.vision.httpx.post", return_value=response):
+            with patch.dict(
+                os.environ,
+                {"OPENAI_BASE_URL": "https://api.deepseek.com", "OPENAI_API_KEY": "test-key"},
+            ):
+                with self.assertRaises(ToolInputError) as raised:
+                    service.ask("give boxes", png_bytes())
+        self.assertIn("reasoning", str(raised.exception).lower())
+
+
 class VisionProbeTests(unittest.TestCase):
     def _probe(self, response: FakeResponse, model: str = "openai-chat:vision-test") -> dict:
         with patch("spatial_intelligence.agent.vision.httpx.post", return_value=response):
@@ -164,8 +244,16 @@ class FakeVision:
         self.supported = supported
         self.calls = []
 
-    def ask(self, question, data, media_type="image/jpeg"):
-        self.calls.append((question, data, media_type))
+    def ask(
+        self,
+        question,
+        data,
+        media_type="image/jpeg",
+        *,
+        thinking=False,
+        max_tokens=2048,
+    ):
+        self.calls.append((question, data, media_type, thinking, max_tokens))
         return "a red square"
 
 

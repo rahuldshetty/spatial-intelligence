@@ -125,11 +125,15 @@ class _VisionFacade:
         image: str = "map",
         max_side: int = 1400,
         bands: list[int] | None = None,
+        thinking: bool = False,
+        max_tokens: int = 2048,
     ) -> str:
         """Ask one question about ``image`` ("map" or a workspace path).
 
         ``bands`` picks the raster channels in R, G, B order (1-based); it is
-        ignored for photos and rejected for the live map capture.
+        ignored for photos and rejected for the live map capture. ``thinking``
+        is DeepSeek's reasoning switch; it defaults off so JSON/box answers are
+        not lost to reasoning, and is ignored by other providers.
         """
         service = self._services.get(VISION_SERVICE)
         if service is None:
@@ -160,7 +164,13 @@ class _VisionFacade:
         else:
             path = self._workspace.resolve(source, must_exist=True)
             data, _, _, _, _, _ = load_image(path, limit, bands)
-        return service.ask(question, data, "image/jpeg")
+        return service.ask(
+            question,
+            data,
+            "image/jpeg",
+            thinking=thinking,
+            max_tokens=max_tokens,
+        )
 
 
 class _ModelCache:

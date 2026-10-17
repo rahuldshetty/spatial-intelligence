@@ -17,6 +17,7 @@ from pydantic_ai.profiles import ModelProfile
 from spatial_intelligence import discovery
 from spatial_intelligence.agent.builder import build_agent
 from spatial_intelligence.contracts.effects import Effect
+from spatial_intelligence.contracts.services import VISION_SERVICE
 from spatial_intelligence.tools.build import (
     PLAN_MUTATION_NAMES,
     PLAN_TOOL_NAMES,
@@ -32,11 +33,13 @@ from spatial_intelligence.workspace import Workspace
 EXPECTED_CORE = frozenset(
     {
         "ai_models",
+        "analyze_image",
         "describe_geolibre_bridge",
         "describe_map",
         "describe_tool",
         "discover_capabilities",
         "find_files",
+        "get_drawn_features",
         "list_files",
         "read_file",
         "request_user_input",
@@ -53,7 +56,7 @@ EXPECTED_CATEGORY_COUNTS = {
     "detection": 1,
     "files": 6,
     "interaction": 1,
-    "layers": 24,
+    "layers": 25,
     "plan": 6,
     "python": 4,
     "raster": 17,
@@ -61,8 +64,13 @@ EXPECTED_CATEGORY_COUNTS = {
     "segmentation": 1,
     "skills": 1,
     "vector": 25,
+    "vision": 1,
     "web": 1,
 }
+
+
+class _SupportedVision:
+    supported = True
 
 
 class ManifestTestCase(unittest.TestCase):
@@ -70,7 +78,10 @@ class ManifestTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
         workspace = Workspace(Path(cls._tmp.name) / "workspace").create()
-        cls.runtime = ToolRuntime(workspace=workspace)
+        cls.runtime = ToolRuntime(
+            workspace=workspace,
+            services={VISION_SERVICE: _SupportedVision()},
+        )
         cls.registry = default_registry(cls.runtime)
 
     @classmethod
@@ -80,7 +91,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 103)
+        self.assertEqual(len(self.registry), 105)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -134,7 +145,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 95)
+        self.assertEqual(len(implemented), 97)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)
@@ -284,6 +295,8 @@ EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "slope",
         "aspect",
     ),
+    "map.aoi": ("get_drawn_features",),
+    "map.vision": ("analyze_image",),
     "catalog.overture": (),
 }
 

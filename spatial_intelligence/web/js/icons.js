@@ -25,6 +25,9 @@ const PATHS = {
   "check-circle": '<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
   circle: '<circle cx="12" cy="12" r="9"/>',
   "x-circle": '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
+  eye:
+    '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/>' +
+    '<circle cx="12" cy="12" r="3"/>',
   "alert-triangle":
     '<path d="M10.3 3.8 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/>' +
     '<path d="M12 9v4M12 17h.01"/>',

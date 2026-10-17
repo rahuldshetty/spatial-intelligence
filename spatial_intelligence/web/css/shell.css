@@ -420,6 +420,21 @@ body.resizing #map-panel iframe {
   50% { opacity: 0.35; }
 }
 
+.vision-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--primary);
+  cursor: help;
+}
+
+.vision-status:hover {
+  color: var(--text);
+}
+
 .status-right {
   margin-left: auto;
   display: flex;

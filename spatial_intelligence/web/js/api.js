@@ -190,6 +190,25 @@ export function setMapProject(project) {
   return request("POST", "/api/map/project", { project });
 }
 
+/** Resolve a pending JSON map query the server sent over SSE. */
+export function sendMapBridge(requestId, token, result, error = null) {
+  return request("POST", "/api/map/bridge/" + encodeURIComponent(requestId), {
+    token,
+    result,
+    error,
+  });
+}
+
+/** Resolve a pending capture request the server sent over SSE. */
+export function sendMapCapture(captureId, token, image, view, error = null) {
+  return request("POST", "/api/map/capture/" + encodeURIComponent(captureId), {
+    token,
+    image,
+    view,
+    error,
+  });
+}
+
 export function reportBridge(payload) {
   return request("POST", "/api/geolibre/bridge", payload);
 }

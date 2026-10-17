@@ -2,7 +2,15 @@
 
 "use strict";
 
-import { getState, runAll, runCell, saveWorkspace } from "./api.js";
+import {
+  getState,
+  runAll,
+  runCell,
+  saveWorkspace,
+  sendMapBridge,
+  sendMapCapture,
+} from "./api.js";
+import { bridgeRequest } from "./bridge.js";
 import { closeAllMenus } from "./components/menubar.js";
 import { revealInteraction } from "./components/interaction.js";
 import { updateJobNode } from "./components/progress.js";
@@ -26,12 +34,16 @@ export function boot() {
   document.addEventListener("keydown", handleShortcut);
   connectEvents({
     onCell: handleCell,
+    onCellDeleted: handleCellDeleted,
     onTrace: handleTrace,
     onJob: handleJob,
     onJobs: handleJobs,
     onMap: handleMap,
     onFiles: handleFiles,
     onSettings: handleSettings,
+    onVision: handleVision,
+    onMapCapture: handleMapCapture,
+    onMapBridge: handleMapBridge,
     onStatus: setConnection,
   });
   loadState();
@@ -96,9 +108,80 @@ function handleCell(cell) {
   }
 }
 
+function handleCellDeleted(data) {
+  const cellId = data && data.id;
+  if (!cellId) return;
+  const cells = state.cells.filter((cell) => cell.id !== cellId);
+  if (cells.length === state.cells.length) return;
+  const jobs = (state.jobs || []).filter((job) => job.parent_id !== cellId);
+  setState({ cells, jobs });
+}
+
 function handleTrace(data) {
   if (!data) return;
   applyTrace(data);
+}
+
+function handleVision(data) {
+  if (!data) return;
+  state.vision = data;
+  refreshStatusBar();
+}
+
+/** Map queries the app is allowed to answer for the server. */
+const MAP_QUERY_METHODS = new Set(["getDrawnFeatures"]);
+
+/** Answer a server JSON map query with the live map's data. */
+async function handleMapBridge(data) {
+  if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  try {
+    if (
+      data.workspace &&
+      state.active_workspace &&
+      data.workspace !== state.active_workspace
+    ) {
+      throw new Error("The workspace changed before the map query ran.");
+    }
+    if (!MAP_QUERY_METHODS.has(data.method)) {
+      throw new Error("Unsupported map query: " + String(data.method));
+    }
+    const result = await bridgeRequest(data.method, data.params || {});
+    await sendMapBridge(data.id, data.token, result);
+  } catch (error) {
+    await sendMapBridge(
+      data.id,
+      data.token,
+      null,
+      error && error.message ? error.message : String(error)
+    ).catch(() => {});
+  }
+}
+
+/** Answer a server capture request with the current map canvas. */
+async function handleMapCapture(data) {
+  if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  try {
+    if (
+      data.workspace &&
+      state.active_workspace &&
+      data.workspace !== state.active_workspace
+    ) {
+      throw new Error("The workspace changed before the map was captured.");
+    }
+    const [image, view] = await Promise.all([
+      bridgeRequest("toImage", {}),
+      bridgeRequest("getView", {}),
+    ]);
+    await sendMapCapture(data.id, data.token, image, view);
+  } catch (error) {
+    await sendMapCapture(
+      data.id,
+      data.token,
+      null,
+      null,
+      error && error.message ? error.message : String(error)
+    ).catch(() => {});
+  }
 }
 
 function handleJob(event) {

@@ -44,7 +44,10 @@ import shapely
 import skimage
 import xarray
 
+from ..agent.imaging import encode_capture, load_image
 from ..ai.store import models_dir
+from ..contracts.errors import ToolInputError
+from ..contracts.services import CAPTURE_SERVICE, VISION_SERVICE
 from ..workspace import Workspace
 from . import packages
 from .output import OutputStore
@@ -98,6 +101,50 @@ class _ConfinedWorkspace:
         return str(self._ws.maps)
 
 
+class _VisionFacade:
+    """Ask the configured vision model about the map or a workspace image.
+
+    This is the Python-side form of the ``analyze_image`` tool: it returns text,
+    not an image part, so a snippet can loop over tiles and parse JSON boxes.
+    Only workspace paths and the live map are accepted; there is no arbitrary
+    URL or raw bytes entry point.
+    """
+
+    def __init__(self, workspace: Workspace, services: dict) -> None:
+        self._workspace = workspace
+        self._services = services
+
+    @property
+    def supported(self) -> bool:
+        service = self._services.get(VISION_SERVICE)
+        return bool(service is not None and service.supported)
+
+    def ask(self, question: str, image: str = "map", max_side: int = 1400) -> str:
+        """Ask one question about ``image`` ("map" or a workspace path)."""
+        service = self._services.get(VISION_SERVICE)
+        if service is None:
+            raise ToolInputError("image input is not configured for this session")
+        if not self.supported:
+            raise ToolInputError(
+                "image input is not available for the configured model"
+            )
+        question = (question or "").strip()
+        if not question:
+            raise ToolInputError("question is required")
+        limit = max(256, min(int(max_side), 2048))
+        source = (image or "map").strip()
+        if source == "map":
+            broker = self._services.get(CAPTURE_SERVICE)
+            if broker is None:
+                raise ToolInputError("the map capture service is not available")
+            capture = broker.request(workspace=self._workspace.root.name)
+            data, _, _ = encode_capture(capture.image, limit)
+        else:
+            path = self._workspace.resolve(source, must_exist=True)
+            data, _, _, _, _ = load_image(path, limit)
+        return service.ask(question, data, "image/jpeg")
+
+
 class _ModelCache:
     """Read-only view of the model cache, bound in run_python as ``models``.
 
@@ -149,15 +196,23 @@ class PythonExecutor:
         output: The store holding the most recent execution's full output.
     """
 
-    def __init__(self, workspace: Workspace, *, approved: bool = False) -> None:
+    def __init__(
+        self,
+        workspace: Workspace,
+        *,
+        approved: bool = False,
+        services: dict | None = None,
+    ) -> None:
         self.workspace = workspace
         self.approved = bool(approved)
+        self.services = services or {}
         self.output = OutputStore()
 
     def namespace(self) -> dict:
         """Return the globals a snippet runs against (fresh per execution)."""
         return {
             "ws": _ConfinedWorkspace(self.workspace),
+            "vision": _VisionFacade(self.workspace, self.services),
             "models": _ModelCache(),
             "rasterio": rasterio,
             "rioxarray": rioxarray,

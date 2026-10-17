@@ -73,9 +73,16 @@ Rules:
    starts and where each finished file lives, and keep every path inside the
    workspace.
 10. After changing the map, call describe_map, and focus it with fit_bounds using
-    the bounds from raster_info or read_vector. The embedded bridge has no
-    scripting RPC, so zoom_to_layer, to_image, identify, and fly_to are
-    unavailable.
+    the bounds from raster_info or read_vector. When the user refers to an AOI,
+    point, or shape they drew on the map, call get_drawn_features: it returns
+    each feature's bbox/center and saves results/drawn_aoi.geojson for clipping,
+    buffering, gridding, or tiling. The embedded bridge has no scripting RPC, so
+    zoom_to_layer, identify, and fly_to are unavailable.
+    When the user asks what the map looks like, or to draw around something
+    visible, call analyze_image: it captures the current viewport only (no UI,
+    legend, or scale bar) and sends it to the model. It exists only when the
+    configured model accepts images; run_python exposes the same capability as
+    vision.ask(question, image="map"|"path").
 11. Use web_search for documentation, provider terms, or current facts no dataset
     tool covers; treat results as leads and download a promising URL to verify.
 12. Report concisely what you did and where outputs live (relative paths).

@@ -33,6 +33,11 @@ class EventBus:
             except ValueError:
                 pass
 
+    def subscriber_count(self) -> int:
+        """Return how many SSE consumers are currently attached."""
+        with self._lock:
+            return len(self._subscribers)
+
     def publish(self, event: str, data: dict) -> None:
         """Deliver one event to every subscriber, dropping dead queues."""
         with self._lock:

@@ -66,6 +66,16 @@ def roots() -> dict:
     return {**ROOTS, **packages.bindings()}
 
 #: The workspace facade ``run_python`` binds, described as its own "symbol".
+VISION_DOC = (
+    "Image-input helper available in run_python.\n"
+    "  vision.supported -> bool\n"
+    "  vision.ask(question, image='map', max_side=1400) -> str\n"
+    "      image is 'map' (the current GeoLibre viewport) or a workspace path\n"
+    "      to a PNG/JPEG/GeoTIFF. Returns the model's answer; use JSON in the\n"
+    "      question if the snippet needs boxes. Rasters are downsampled.\n"
+    "Only available when the configured endpoint and model accept images."
+)
+
 WS_DOC = (
     "Confined workspace facade available in run_python (no raw path/network).\n"
     "  ws.resolve(rel, must_exist=False, write=False) -> Path\n"
@@ -174,12 +184,14 @@ def describe(name: str = "") -> dict:
     if not name:
         return {
             "kind": "namespace",
-            "roots": sorted(available) + ["ws"],
+            "roots": sorted(available) + ["vision", "ws"],
             "doc": "Top-level run_python names. Query a dotted path for details.",
         }
 
     if name == "ws" or name.startswith("ws."):
         return {"name": name, "kind": "workspace helper", "doc": WS_DOC}
+    if name == "vision" or name.startswith("vision."):
+        return {"name": name, "kind": "image helper", "doc": VISION_DOC}
 
     parts = name.split(".")
     root = parts[0]
@@ -200,4 +212,13 @@ def describe(name: str = "") -> dict:
     return _describe(name, obj)
 
 
-__all__ = ["MAX_DOC", "MAX_MEMBERS", "MAX_REPR", "ROOTS", "WS_DOC", "describe", "roots"]
+__all__ = [
+    "MAX_DOC",
+    "MAX_MEMBERS",
+    "MAX_REPR",
+    "ROOTS",
+    "VISION_DOC",
+    "WS_DOC",
+    "describe",
+    "roots",
+]

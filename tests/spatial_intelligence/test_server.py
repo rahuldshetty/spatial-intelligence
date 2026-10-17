@@ -7,7 +7,6 @@ covered without starting uvicorn.
 
 import contextlib
 import io
-import json
 import os
 import queue
 import sys
@@ -72,6 +71,7 @@ class StateRouteTests(ServerTestCase):
                 "map_app_url",
                 "map_project",
                 "settings",
+                "vision",
                 "workspaces",
             ],
         )
@@ -79,6 +79,7 @@ class StateRouteTests(ServerTestCase):
         self.assertEqual(snapshot["cells"], [])
         self.assertEqual(snapshot["jobs"], [])
         self.assertIn("model", snapshot["settings"])
+        self.assertEqual(snapshot["vision"]["available"], False)
 
     def test_the_shell_and_its_scripts_are_served(self):
         index = self.client.get("/")
@@ -143,6 +144,35 @@ class WorkspaceRouteTests(ServerTestCase):
 
         remaining = self.client.delete(f"/api/cells/{cell_id}").json()
         self.assertEqual([cell["id"] for cell in remaining["cells"]], [second])
+
+    def test_deleting_a_cell_twice_is_idempotent_and_broadcast(self):
+        self.open_workspace()
+        snapshot = self.add_cell("prompt", "hello")
+        cell_id = snapshot["cells"][0]["id"]
+        state = deps.app_state()
+        subscriber = state.subscribe()
+
+        first = self.client.delete(f"/api/cells/{cell_id}")
+        second = self.client.delete(f"/api/cells/{cell_id}")
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertNotIn(cell_id, [cell["id"] for cell in second.json()["cells"]])
+        events = []
+        while True:
+            try:
+                events.append(subscriber.get_nowait())
+            except queue.Empty:
+                break
+        state.unsubscribe(subscriber)
+        self.assertTrue(
+            any(
+                event["event"] == "cell_deleted"
+                and event["data"]["id"] == cell_id
+                for event in events
+            ),
+            events,
+        )
 
     def test_an_unknown_cell_kind_is_a_bad_request(self):
         self.open_workspace()

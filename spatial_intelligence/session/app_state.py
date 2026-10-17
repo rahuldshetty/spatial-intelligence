@@ -17,6 +17,7 @@ from .. import workflows
 from ..agent import verdict
 from ..agent.model import validate_model
 from ..agent.runner import PromptRunner, RunnerHooks
+from ..agent.vision import VisionService
 from ..ai import profiles
 from ..contracts.errors import ToolInputError
 from ..map.bridge import reset_bridge
@@ -25,7 +26,9 @@ from ..settings.env import DEFAULT_MODEL, list_workspaces, workspace_root
 from ..tools.runtime import ToolRuntime, bind
 from ..workflows import library
 from .bus import EventBus
+from .capture import CaptureBroker
 from .jobs import JobRegistry
+from .map_bridge import MapBridgeBroker
 from .notebook_session import RUNNABLE_KINDS, NotebookSession
 from .runs import RunQueue
 from .services import SessionServices
@@ -35,7 +38,13 @@ from .workspace_session import WorkspaceSession
 class AppState:
     """Single-owner state for the running server."""
 
-    def __init__(self, *, settings: dict | None = None, worker: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        settings: dict | None = None,
+        worker: bool = True,
+        probe_vision: bool = False,
+    ) -> None:
         self.lock = threading.RLock()
         self.settings = settings or prefs.load_settings()
         self.bus = EventBus()
@@ -43,6 +52,13 @@ class AppState:
         self.runs = RunQueue()
         self.notebook = NotebookSession()
         self.workspaces = WorkspaceSession()
+        self.capture = CaptureBroker(self.bus)
+        self.map_bridge = MapBridgeBroker(self.bus)
+        self.vision = VisionService(
+            self.settings.get("model", DEFAULT_MODEL),
+            on_change=self._vision_changed,
+            enabled=probe_vision,
+        )
         self.services = SessionServices(
             bus=self.bus,
             jobs=self.jobs,
@@ -50,10 +66,15 @@ class AppState:
             files_provider=lambda: self.list_files(),
             map_provider=lambda: self.workspaces.project(),
             trace_length=self._trace_length,
+            vision=self.vision,
+            capture=self.capture,
+            map_bridge=self.map_bridge,
         )
         self._worker: threading.Thread | None = None
         if worker:
             self._start_worker()
+        if probe_vision:
+            self.vision.start()
 
     # -- snapshot --------------------------------------------------------
 
@@ -69,6 +90,7 @@ class AppState:
                 "files": self.list_files(),
                 "jobs": self.jobs.snapshot(),
                 "settings": dict(self.settings),
+                "vision": self.vision.snapshot(),
             }
 
     def subscribe(self):
@@ -78,6 +100,39 @@ class AppState:
     def unsubscribe(self, subscriber) -> None:
         """Deregister an SSE subscriber."""
         self.bus.unsubscribe(subscriber)
+
+    def complete_capture(
+        self,
+        capture_id: str,
+        token: str,
+        *,
+        image: str | None = None,
+        view: dict | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """Resolve a browser capture request (see ``CaptureBroker``)."""
+        return self.capture.complete(
+            capture_id, token, image=image, view=view, error=error
+        )
+
+    def complete_map_bridge(
+        self,
+        request_id: str,
+        token: str,
+        *,
+        result: object = None,
+        error: str | None = None,
+    ) -> bool:
+        """Resolve a JSON map query (see ``MapBridgeBroker``)."""
+        return self.map_bridge.complete(request_id, token, result=result, error=error)
+
+    def _vision_changed(self) -> None:
+        """Publish a probe result and add/remove the image tool accordingly."""
+        with self.lock:
+            if self.services.bound:
+                self.services.sync_vision()
+            snapshot = self.vision.snapshot()
+        self.bus.publish("vision", snapshot)
 
     # -- settings --------------------------------------------------------
 
@@ -111,8 +166,11 @@ class AppState:
                 if model_changed:
                     validate_model(self.settings["model"])
                 self.settings = prefs.save_settings(self.settings)
+                if model_changed:
+                    self.vision.reconfigure(self.settings["model"])
                 if model_changed and self.services.bound:
                     self.services.rebuild_agent()
+                    self.services.sync_vision()
             except Exception as exc:  # roll back and surface
                 self.settings["model"] = previous_model
                 self.settings = prefs.save_settings(self.settings)
@@ -133,6 +191,8 @@ class AppState:
         # app as disconnected for the rest of the session.
         if name != self.workspaces.name:
             reset_bridge()
+            self.capture.cancel_all("the workspace changed during the capture")
+            self.map_bridge.cancel_all("the workspace changed during the query")
         with self.lock:
             workspace = self.workspaces.open(name)
             self.notebook.load(workspace)
@@ -204,6 +264,8 @@ class AppState:
         """Close the open workspace and reset the map and notebook."""
         self.runs.wait_idle()
         reset_bridge()
+        self.capture.cancel_all("the workspace was closed")
+        self.map_bridge.cancel_all("the workspace was closed")
         with self.lock:
             self.workspaces.close()
             self.notebook.close()
@@ -239,10 +301,18 @@ class AppState:
             return self.snapshot()
 
     def delete_cell(self, cell_id: str) -> dict:
-        """Delete a cell, its provenance, its traces, and its progress jobs."""
+        """Delete a cell, its provenance, its traces, and its progress jobs.
+
+        Idempotent: a stale tab that deletes the same cell twice gets the current
+        snapshot instead of a 404. Every deletion is broadcast so other tabs drop
+        the row without waiting for a reload.
+        """
         with self.lock:
+            if self.notebook.find_or_none(cell_id) is None:
+                return self.snapshot()
             self.notebook.delete(cell_id)
             self.jobs.clear_parent(cell_id)
+            self.bus.publish("cell_deleted", {"id": cell_id})
             return self.snapshot()
 
     def move_cell(self, cell_id: str, index: int) -> dict:

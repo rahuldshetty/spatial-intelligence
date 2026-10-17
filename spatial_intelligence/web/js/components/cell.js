@@ -1,12 +1,12 @@
 /* One cell: header actions, source, output, trace, and its job strip. */
 
 import { el, expandableContent, toast, usageLabel, usageTitle } from "../dom.js";
-import { deleteCell, moveCell, runCell, stopCell, updateCell } from "../api.js";
+import { moveCell, runCell, stopCell, updateCell } from "../api.js";
 import { icon } from "../icons.js";
 import { state } from "../store.js";
 import { cellOutputText, renderMarkdown } from "./markdown.js";
 import { renderTrace } from "./trace.js";
-import { editMarkdown } from "../pages/cells.js";
+import { editMarkdown, isCellDeleted, removeCell } from "../pages/cells.js";
 
 /** Fire a cell action, surfacing its failure the way the old app did. */
 function act(action) {
@@ -82,16 +82,16 @@ function renderHeader(cell, kind, geoai, generated) {
     if (!generated) {
       actions.append(
         headButton("pencil", "Edit", () => editMarkdown(cell)),
-        headButton("trash-2", "Delete", () => act(() => deleteCell(cell.id)))
+        headButton("trash-2", "Delete", () => act(() => removeCell(cell.id)))
       );
     }
   } else if (kind === "tool") {
-    actions.append(headButton("trash-2", "Delete", () => deleteCell(cell.id)));
+    actions.append(headButton("trash-2", "Delete", () => act(() => removeCell(cell.id))));
   } else {
     actions.append(
       headButton("chevron-up", "Move up", () => act(() => moveCell(cell.id, -1))),
       headButton("chevron-down", "Move down", () => act(() => moveCell(cell.id, 1))),
-      headButton("trash-2", "Delete", () => deleteCell(cell.id))
+      headButton("trash-2", "Delete", () => act(() => removeCell(cell.id)))
     );
   }
   header.append(actions);
@@ -122,7 +122,17 @@ function renderBody(cell, kind, geoai, source, generated) {
         if (idx >= 0) state.cells[idx].source = ta.value;
         autoGrow(ta);
       });
-      ta.addEventListener("blur", () => {
+      ta.addEventListener("blur", (event) => {
+        if (isCellDeleted(cell.id)) return;
+        const target = event && event.relatedTarget;
+        if (
+          target &&
+          typeof target.closest === "function" &&
+          target.closest(".cell")?.getAttribute("data-cell-id") === cell.id &&
+          target.closest('button[title="Delete"]')
+        ) {
+          return;
+        }
         act(() => updateCell(cell.id, ta.value));
       });
     }

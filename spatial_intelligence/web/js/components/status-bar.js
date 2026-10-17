@@ -7,8 +7,9 @@ panel.
 */
 
 import { el, formatCost, formatTokens } from "../dom.js";
+import { icon } from "../icons.js";
 import { followToggle } from "../scroll.js";
-import { usageTotals } from "../store.js";
+import { state, usageTotals } from "../store.js";
 
 let connection = "connecting";
 
@@ -35,6 +36,21 @@ function connectionNode() {
   return node;
 }
 
+function visionNode() {
+  const vision = state.vision;
+  if (!vision || !vision.available) return null;
+  const label =
+    "Image input available" + (vision.model ? " · " + vision.model : "");
+  const node = el("span", {
+    class: "vision-status",
+    role: "status",
+    title: label,
+    "aria-label": label,
+  });
+  node.append(icon("eye", { size: 15 }));
+  return node;
+}
+
 function usageDetails(u) {
   const rounded = u.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
   const parts = [
@@ -50,6 +66,8 @@ function usageDetails(u) {
 export function renderStatusBar() {
   const bar = el("div", { id: "status-bar" });
   bar.append(connectionNode());
+  const vision = visionNode();
+  if (vision) bar.append(vision);
 
   const u = usageTotals();
   if (u.has) {

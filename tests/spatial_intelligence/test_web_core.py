@@ -827,7 +827,16 @@ await scenario("map", async () => {
   eq(
     "map.bridge_handshake",
     handshake && handshake.body,
-    JSON.stringify({ version: "1.2", methods: ["project.load", "project.request_state"] })
+    JSON.stringify({
+      version: "1.2",
+      methods: [
+        "project.load",
+        "project.request_state",
+        "toImage",
+        "getView",
+        "getDrawnFeatures",
+      ],
+    })
   );
   eq("map.loads_project_on_ready", posted.length, 1);
   eq("map.load_project_message", posted[0].message, { type: "geolibre:load-project", seq: 1, project: store.state.map_project });
@@ -841,12 +850,16 @@ await scenario("map", async () => {
   });
   await tick();
   eq("map.persists_child_state", fetchCalls.filter((call) => call.url === "/api/map/project").length, 1);
+  eq(
+    "map.tracks_child_state",
+    store.state.map_project,
+    { layers: [{ id: "a" }], view: { center: [0, 0] } }
+  );
   map.syncMap();
   eq("map.suppresses_echo", posted.length, 0);
 
   posted.length = 0;
-  sendMessage(ORIGIN, iframe.contentWindow, { type: "geolibre:state", project: { layers: [{ id: "b" }] } });
-  await tick();
+  store.state.map_project = { layers: [{ id: "server" }] };
   map.syncMap();
   eq("map.reposts_after_divergence", posted.length, 1);
   eq("map.seq_increments", posted[0].message.seq, 2);

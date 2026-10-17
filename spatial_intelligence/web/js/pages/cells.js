@@ -1,7 +1,7 @@
 /* Cells tab: the cell list, standalone jobs, and the cell actions. */
 
 import { el, toast } from "../dom.js";
-import { addCell as createCell, updateCell } from "../api.js";
+import { addCell as createCell, deleteCell as deleteCellRequest, updateCell } from "../api.js";
 import { icon } from "../icons.js";
 import { hold, isFollowing, scrollTo } from "../scroll.js";
 import { jobsFor, normalizeCells, setState, state } from "../store.js";
@@ -98,7 +98,17 @@ export function editMarkdown(cell) {
   const source = cell.source == null ? "" : String(cell.source);
   const ta = el("textarea", { rows: Math.min(12, Math.max(2, source.split("\n").length)) });
   ta.value = source;
-  ta.addEventListener("blur", async () => {
+  ta.addEventListener("blur", async (event) => {
+    if (deletingCells.has(cell.id)) return;
+    const target = event && event.relatedTarget;
+    if (
+      target &&
+      typeof target.closest === "function" &&
+      target.closest(".cell")?.getAttribute("data-cell-id") === cell.id &&
+      target.closest('button[title="Delete"]')
+    ) {
+      return;
+    }
     const idx = state.cells.findIndex((c) => c.id === cell.id);
     if (idx >= 0) state.cells[idx].source = ta.value;
     try {
@@ -126,6 +136,28 @@ export function focusCell(cell) {
   });
 }
 
+const deletingCells = new Set();
+
+/** Whether a delete is in flight for ``cellId`` (its blur save must not run). */
+export function isCellDeleted(cellId) {
+  return deletingCells.has(cellId);
+}
+
+/** Delete a cell and apply the returned snapshot immediately. */
+export async function removeCell(cellId) {
+  deletingCells.add(cellId);
+  try {
+    const snap = await deleteCellRequest(cellId);
+    const patch = {};
+    if (Array.isArray(snap.cells)) patch.cells = normalizeCells(snap.cells);
+    if (Array.isArray(snap.jobs)) patch.jobs = snap.jobs;
+    setState(patch);
+  } catch (error) {
+    deletingCells.delete(cellId);
+    throw error;
+  }
+}
+
 export async function addCell(kind) {
   if (!state.active_workspace) {
     toast("No workspace open", "warning");
@@ -141,10 +173,9 @@ export async function addCell(kind) {
     const cell = state.cells.find((candidate) => !before.has(candidate.id));
     if (cell) {
       focusCell(cell);
-      // Adding a cell is an explicit action, so follow it even if the reader
-      // was somewhere else in the history.
-      const follow = panelFollower();
-      if (follow) follow.jump();
+      // If the reader already chose Follow, pin the new cell at the bottom.
+      // `hold` is a no-op when following is off, so their position is kept.
+      hold();
     }
   } catch (e) {
     toast(e.message || String(e), "error");

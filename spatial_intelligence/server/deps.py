@@ -7,6 +7,7 @@ import the server package without side effects.
 
 from __future__ import annotations
 
+import os
 import sys
 from functools import lru_cache
 
@@ -25,7 +26,8 @@ SHUTDOWN_TIMEOUT = 5.0
 def app_state() -> AppState:
     """Return the process-wide :class:`AppState`, creating it once."""
     load_env()
-    return AppState()
+    probe = os.getenv("GEOAI_VISION_PROBE", "").strip().lower() in {"1", "true", "yes"}
+    return AppState(probe_vision=probe)
 
 
 def close_app_state() -> None:

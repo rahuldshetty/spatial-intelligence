@@ -572,6 +572,34 @@ class StatusBarRenderingTests(WebRenderingTestCase):
         self.assertIn("live updates", rendered["connTitle"].lower())
         self.assertEqual(rendered["toggles"], 1)
 
+    def test_status_bar_shows_image_input_only_when_available(self):
+        base = (
+            "const { state } = await import(" + json.dumps(module_url("store.js")) + ");"
+            "state.cells = [];"
+        )
+        shown = self.run_module(
+            module_url("components", "status-bar.js"),
+            base
+            + "state.vision = { available: true, model: 'openai:vision-model', state: 'supported' };"
+            "const bar = mod.renderStatusBar();"
+            "const node = bar.querySelector('.vision-status');"
+            "return { count: bar.querySelectorAll('.vision-status').length,"
+            "  title: node && node.attributes.title,"
+            "  icons: node ? node.querySelectorAll('.icon').length : 0 };",
+        )
+        hidden = self.run_module(
+            module_url("components", "status-bar.js"),
+            base + "state.vision = { available: false, model: 'openai:text-only' };"
+            "const bar = mod.renderStatusBar();"
+            "return { count: bar.querySelectorAll('.vision-status').length };",
+        )
+
+        self.assertEqual(shown["count"], 1)
+        self.assertEqual(shown["icons"], 1)
+        self.assertIn("Image input available", shown["title"])
+        self.assertIn("openai:vision-model", shown["title"])
+        self.assertEqual(hidden["count"], 0)
+
     def test_refresh_status_bar_replaces_only_the_status_bar_node(self):
         rendered = self.run_module(
             module_url("components", "status-bar.js"),

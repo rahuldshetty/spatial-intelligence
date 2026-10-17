@@ -758,6 +758,7 @@ class LayersPackTests(MapTestCase):
         registry = self.build_pack([], [])
         expected = {
             "describe_map": frozenset({Effect.READ}),
+            "get_drawn_features": frozenset({Effect.READ}),
             "describe_geolibre_bridge": frozenset({Effect.READ}),
             "list_colormaps": frozenset({Effect.READ}),
             "list_style_keys": frozenset({Effect.READ}),
@@ -787,7 +788,8 @@ class LayersPackTests(MapTestCase):
         for name, effects in expected.items():
             self.assertEqual(registry.get(name).effects, effects, name)
         self.assertEqual(
-            registry.core_names(), {"describe_map", "describe_geolibre_bridge"}
+            registry.core_names(),
+            {"describe_map", "get_drawn_features", "describe_geolibre_bridge"},
         )
         self.assertNotIn("zoom_to_layer", registry)
         self.assertEqual(registry.categories(), {"layers": tuple(expected)})

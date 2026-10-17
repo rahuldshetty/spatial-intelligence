@@ -42,6 +42,15 @@ class CapabilityPack:
         ``search_tools`` round-trip.
         """
         found = discovery.discover(self._registry(), goal, limit)
+        # A conditional capability (vision) is only useful when its tool is
+        # actually registered; drop empty available entries from the answer.
+        found = [
+            item
+            for item in found
+            if item.get("tools")
+            or item.get("geolibre_plugins")
+            or item.get("status") != "available"
+        ]
         names = [
             tool["name"]
             for item in found

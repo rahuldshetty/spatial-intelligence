@@ -52,6 +52,13 @@ class ToolRegistry:
         """Register several specs, returning them in order."""
         return [self.add(spec) for spec in specs]
 
+    def remove(self, name: str) -> None:
+        """Drop one spec (a capability that is no longer available)."""
+        if name not in self._specs:
+            return
+        del self._specs[name]
+        self._order.remove(name)
+
     def add_module(self, module: ModuleType) -> list[ToolSpec]:
         """Register every ``@tool`` function declared at module level."""
         added = [

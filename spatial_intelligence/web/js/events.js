@@ -3,7 +3,19 @@ backoff (the browser's built-in retry is short and bursty after a restart). */
 
 "use strict";
 
-const EVENT_ROUTES = ["cell", "trace", "job", "jobs", "map", "files", "settings"];
+const EVENT_ROUTES = [
+  "cell",
+  "cell_deleted",
+  "trace",
+  "job",
+  "jobs",
+  "map",
+  "files",
+  "settings",
+  "vision",
+  "map_capture",
+  "map_bridge",
+];
 const INITIAL_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30000;
 
@@ -13,7 +25,11 @@ export function connectEvents(handlers = {}) {
     if (reportStatus) reportStatus(value);
   };
   const routes = EVENT_ROUTES.map((name) => {
-    const handler = handlers["on" + name.charAt(0).toUpperCase() + name.slice(1)];
+    const suffix = name
+      .split(/[_-]/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("");
+    const handler = handlers["on" + suffix];
     return [name, typeof handler === "function" ? handler : null];
   });
 

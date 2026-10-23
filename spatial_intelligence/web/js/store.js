@@ -20,6 +20,7 @@ export const state = {
   workspaces: [],
   cells: [],
   map_project: null,
+  map_revision: 0,
   map_app_url: null,
   files: [],
   jobs: [],
@@ -61,6 +62,8 @@ export function applySnapshot(snapshot) {
     workspaces: snap.workspaces || [],
     cells: incoming.map((cell) => keepStreamedSteps(cell, live.get(cell.id))),
     map_project: snap.map_project != null ? snap.map_project : null,
+    map_revision:
+      snap.map_revision != null ? snap.map_revision : state.map_revision,
     map_app_url: snap.map_app_url != null ? snap.map_app_url : null,
     files: snap.files || [],
     jobs: snap.jobs || [],

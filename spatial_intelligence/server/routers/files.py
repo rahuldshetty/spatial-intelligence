@@ -112,4 +112,13 @@ def api_set_map_project(body: dict) -> dict:
     project = body.get("project")
     if not isinstance(project, dict):
         raise HTTPException(status_code=400, detail="project must be an object")
-    return app_state().set_map_project(project)
+    revision = body.get("revision")
+    if revision is not None:
+        try:
+            revision = int(revision)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="revision must be an integer") from exc
+    workspace = body.get("workspace")
+    if workspace is not None and not isinstance(workspace, str):
+        raise HTTPException(status_code=400, detail="workspace must be a string")
+    return app_state().set_map_project(project, revision=revision, workspace=workspace)

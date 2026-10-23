@@ -144,17 +144,23 @@ function handleRunning(data) {
 /** Map queries the app is allowed to answer for the server. */
 const MAP_QUERY_METHODS = new Set(["getDrawnFeatures"]);
 
+/**
+ * Whether this tab owns the workspace a map request was sent for.
+ *
+ * Capture and query requests are broadcast over SSE to every open tab. A tab
+ * on another workspace must stay silent: answering with an error resolves the
+ * server's pending request and poisons it for the tab that can actually
+ * answer. The server times out with a useful message if no tab owns it.
+ */
+function ownsMapWorkspace(workspace) {
+  return !workspace || workspace === state.active_workspace;
+}
+
 /** Answer a server JSON map query with the live map's data. */
 async function handleMapBridge(data) {
   if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  if (!ownsMapWorkspace(data.workspace)) return;
   try {
-    if (
-      data.workspace &&
-      state.active_workspace &&
-      data.workspace !== state.active_workspace
-    ) {
-      throw new Error("The workspace changed before the map query ran.");
-    }
     if (!MAP_QUERY_METHODS.has(data.method)) {
       throw new Error("Unsupported map query: " + String(data.method));
     }
@@ -173,14 +179,8 @@ async function handleMapBridge(data) {
 /** Answer a server capture request with the current map canvas. */
 async function handleMapCapture(data) {
   if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  if (!ownsMapWorkspace(data.workspace)) return;
   try {
-    if (
-      data.workspace &&
-      state.active_workspace &&
-      data.workspace !== state.active_workspace
-    ) {
-      throw new Error("The workspace changed before the map was captured.");
-    }
     const [image, view] = await Promise.all([
       bridgeRequest("toImage", {}),
       bridgeRequest("getView", {}),
@@ -223,6 +223,7 @@ function handleJobs(payload) {
 function handleMap(payload) {
   if (!payload) return;
   state.map_project = payload.project != null ? payload.project : null;
+  if (payload.revision != null) state.map_revision = payload.revision;
   syncMap();
 }
 

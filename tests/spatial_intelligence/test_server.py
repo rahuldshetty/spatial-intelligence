@@ -70,6 +70,7 @@ class StateRouteTests(ServerTestCase):
                 "jobs",
                 "map_app_url",
                 "map_project",
+                "map_revision",
                 "running_cell",
                 "settings",
                 "vision",
@@ -232,6 +233,65 @@ class WorkspaceRouteTests(ServerTestCase):
         )
         self.assertTrue(snapshot.is_file())
 
+    def test_a_stale_map_project_push_is_rejected(self):
+        self.open_workspace()
+        state = self.client.get("/api/state").json()
+        revision = state["map_revision"]
+        project = state["map_project"]
+        newer = {**project, "mapView": {**project.get("mapView", {}), "zoom": 9}}
+
+        accepted = self.client.post(
+            "/api/map/project",
+            json={
+                "project": newer,
+                "revision": revision,
+                "workspace": state["active_workspace"],
+            },
+        )
+        self.assertEqual(accepted.status_code, 200)
+        body = accepted.json()
+        self.assertTrue(body["accepted"])
+        self.assertGreater(body["revision"], revision)
+
+        stale = self.client.post(
+            "/api/map/project",
+            json={
+                "project": project,
+                "revision": revision,
+                "workspace": state["active_workspace"],
+            },
+        )
+        self.assertEqual(stale.status_code, 200)
+        stale_body = stale.json()
+        self.assertFalse(stale_body["accepted"])
+        self.assertEqual(stale_body["revision"], body["revision"])
+        self.assertEqual(
+            stale_body["project"]["mapView"]["zoom"],
+            newer["mapView"]["zoom"],
+        )
+
+    def test_a_map_project_from_another_workspace_is_ignored(self):
+        self.open_workspace()
+        state = self.client.get("/api/state").json()
+
+        response = self.client.post(
+            "/api/map/project",
+            json={
+                "project": {**state["map_project"], "layers": []},
+                "revision": state["map_revision"],
+                "workspace": "another-workspace",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["accepted"])
+        self.assertTrue(body["workspace_mismatch"])
+        self.assertEqual(
+            self.client.get("/api/state").json()["map_project"],
+            state["map_project"],
+        )
+
 
 class FileRouteTests(ServerTestCase):
     def test_a_workspace_file_is_served_with_cors_headers(self):
@@ -357,6 +417,37 @@ class EventStreamTests(ServerTestCase):
         settings_events = [item for item in events if item["event"] == "settings"]
         self.assertTrue(settings_events)
         self.assertEqual(settings_events[-1]["data"]["settings"]["theme"], "dark")
+
+    def test_map_events_carry_the_project_revision(self):
+        self.open_workspace()
+        state = deps.app_state()
+        subscriber = state.subscribe()
+        snapshot = state.snapshot()
+        project = {
+            **snapshot["map_project"],
+            "mapView": {**snapshot["map_project"].get("mapView", {}), "zoom": 7},
+        }
+
+        state.set_map_project(
+            project,
+            revision=snapshot["map_revision"],
+            workspace=snapshot["active_workspace"],
+        )
+
+        events = []
+        while True:
+            try:
+                events.append(subscriber.get_nowait())
+            except queue.Empty:
+                break
+        state.unsubscribe(subscriber)
+
+        map_events = [item for item in events if item["event"] == "map"]
+        self.assertTrue(map_events)
+        self.assertEqual(
+            map_events[-1]["data"]["revision"], state.workspaces.map_revision
+        )
+        self.assertIn("project", map_events[-1]["data"])
 
     # The SSE frames themselves are verified against a live uvicorn server: the
     # in-process test client buffers a whole response body, so it cannot read an

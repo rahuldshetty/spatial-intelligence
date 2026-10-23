@@ -117,6 +117,15 @@ class ManifestTests(ManifestTestCase):
         self.assertTrue(self.registry.replay_safe("raster_info"))
         self.assertFalse(self.registry.replay_safe("brand_new_tool"))
 
+    def test_map_writes_are_executed_sequentially(self):
+        for spec in self.registry.specs():
+            if Effect.MAP_WRITE in spec.effects:
+                self.assertTrue(spec.sequential, spec.name)
+        self.assertTrue(self.registry.get("add_raster").sequential)
+        self.assertTrue(self.registry.get("add_geojson").sequential)
+        self.assertFalse(self.registry.get("describe_map").sequential)
+        self.assertFalse(self.registry.get("raster_info").sequential)
+
     def test_plan_tools_are_classified_and_replay_safe(self):
         for name in PLAN_TOOL_NAMES:
             spec = self.registry.get(name)

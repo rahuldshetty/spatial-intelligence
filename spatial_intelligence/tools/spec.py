@@ -180,19 +180,25 @@ class ToolDeclaration:
                 f"tool {name!r} has no category; pass category=... to @tool or @pack"
             )
         effects = _first(self.effects, defaults.effects)
+        effects = READ_ONLY if effects is None else frozenset(effects)
         return ToolSpec(
             name=name,
             summary=self.summary or summary_of(fn),
             category=category,
             fn=fn,
-            effects=READ_ONLY if effects is None else frozenset(effects),
+            effects=effects,
             kind=_first(self.kind, defaults.kind, ToolKind.SYNC),
             core=bool(_first(self.core, defaults.core, False)),
             requires_approval=bool(
                 _first(self.requires_approval, defaults.requires_approval, False)
             ),
             timeout=self.timeout,
-            sequential=bool(_first(self.sequential, defaults.sequential, False)),
+            # Map mutations are read-copy-reassign operations on one shared
+            # project. Running two in parallel (pydantic-ai does by default)
+            # lets one overwrite the other's layer, so they are barriers even
+            # unless a pack explicitly says otherwise.
+            sequential=bool(_first(self.sequential, defaults.sequential, False))
+            or Effect.MAP_WRITE in effects,
             capabilities=tuple(defaults.capabilities) + tuple(self.capabilities),
             origin=self.origin,
         )

@@ -15,12 +15,14 @@ import http.client
 import socket
 import ssl
 import urllib.error
+from contextlib import nullcontext
 from dataclasses import replace
 
 from pydantic_ai import ToolFailed
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ToolCallPart
 
+from ..map import MAP_LOCK
 from ..tools.runtime import ToolRuntime
 
 #: Total attempts for a tool call that keeps failing with a transient error.
@@ -148,22 +150,28 @@ class ToolFailurePolicy(AbstractCapability[ToolRuntime]):
 
         The final attempt sits outside the loop, so a transient failure is
         always given every attempt before it is allowed to reach the model.
+        Map-writing tools additionally take the process-wide map lock: the
+        browser can push a project at any time, and every such mutation is a
+        read-copy-reassign that would otherwise lose a concurrent layer.
         """
-        for attempt in range(1, TRANSIENT_TOOL_ATTEMPTS):
-            try:
-                return await handler(args)
-            except Exception as error:  # noqa: BLE001 - classified on the next line
-                # Control flow (deferrals, retries, cancellation) is never
-                # transient, so it passes through here untouched.
-                if not is_transient_tool_error(error):
-                    raise
-                await asyncio.sleep(
-                    min(
-                        TRANSIENT_TOOL_BACKOFF_SECONDS * 2 ** (attempt - 1),
-                        MAX_TRANSIENT_TOOL_BACKOFF_SECONDS,
+        effects = set((tool_def.metadata or {}).get("si_effects") or ())
+        guard = MAP_LOCK if "map_write" in effects else nullcontext()
+        with guard:
+            for attempt in range(1, TRANSIENT_TOOL_ATTEMPTS):
+                try:
+                    return await handler(args)
+                except Exception as error:  # noqa: BLE001 - classified on the next line
+                    # Control flow (deferrals, retries, cancellation) is never
+                    # transient, so it passes through here untouched.
+                    if not is_transient_tool_error(error):
+                        raise
+                    await asyncio.sleep(
+                        min(
+                            TRANSIENT_TOOL_BACKOFF_SECONDS * 2 ** (attempt - 1),
+                            MAX_TRANSIENT_TOOL_BACKOFF_SECONDS,
+                        )
                     )
-                )
-        return await handler(args)
+            return await handler(args)
 
     async def on_tool_execute_error(self, ctx, *, call, tool_def, args, error):
         """Report a raised tool error as the call's failed result."""

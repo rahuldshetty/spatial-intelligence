@@ -186,8 +186,11 @@ export function checkImportUrl(url) {
   return request("POST", "/api/import/check", { url });
 }
 
-export function setMapProject(project) {
-  return request("POST", "/api/map/project", { project });
+export function setMapProject(project, revision = null, workspace = null) {
+  const body = { project };
+  if (revision != null) body.revision = revision;
+  if (workspace != null) body.workspace = workspace;
+  return request("POST", "/api/map/project", body);
 }
 
 /** Resolve a pending JSON map query the server sent over SSE. */

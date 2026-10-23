@@ -43,6 +43,10 @@ MAX_CONTOUR_LEVELS = 200
 #: fetches whole tiles over range requests, so a striped file (one row per block)
 #: would make it read the entire image for the first screenful.
 COG_MIN_BLOCK = 256
+#: A tiled raster larger than this needs overviews to be COG-shaped. Without
+#: them every zoomed-out screenful reads full-resolution tiles, which is the
+#: same failure a striped file causes for the first screenful.
+COG_MAX_SIZE_WITHOUT_OVERVIEWS = 1024
 
 #: Options that are ``gdal_translate`` *API* arguments rather than creation options.
 #: GDAL's creation-option path ignores the ones a driver does not know, so without
@@ -190,10 +194,12 @@ def looks_cog(path: Path) -> bool | None:
     The check is structural — tiled, with blocks big enough to be worth a range
     request — because that is what the map's COG client depends on, and because it
     is the property the failed conversion was about: a striped GeoTIFF pulls the
-    whole image for the first screenful. ``rio-cogeo``'s validator is deliberately
-    not used here: it calls a 64x64 striped file a valid COG, so it cannot be the
-    gate (it remains available to generated code, and as a second opinion when a
-    file is checked by hand).
+    whole image for the first screenful. A tiled file without overviews has the
+    same problem when the view is zoomed out: every screenful still reads the
+    full-resolution tiles, so a large tiled GeoTIFF is not COG-shaped either.
+    ``rio-cogeo``'s validator is deliberately not used here: it calls a 64x64
+    striped file a valid COG, so it cannot be the gate (it remains available to
+    generated code, and as a second opinion when a file is checked by hand).
 
     Returns ``None`` when the file cannot be read as a raster at all — the one
     case where a caller should keep its own behavior rather than convert.
@@ -203,7 +209,11 @@ def looks_cog(path: Path) -> bool | None:
             if not ds.is_tiled:
                 return False
             block = ds.block_shapes[0] if ds.block_shapes else (0, 0)
-            return min(block) >= COG_MIN_BLOCK
+            if min(block) < COG_MIN_BLOCK:
+                return False
+            if max(ds.width, ds.height) > COG_MAX_SIZE_WITHOUT_OVERVIEWS:
+                return bool(ds.overviews(1))
+            return True
     except Exception:
         return None
 

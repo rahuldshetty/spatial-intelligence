@@ -26,6 +26,7 @@ let iframeWorkspace = null;
 let mapReady = false;
 let lastRemoteProject = null;
 let mapSeq = 0;
+let lastSentSeq = 0;
 let listening = false;
 
 export function mountMap() {
@@ -49,6 +50,8 @@ export function syncMap() {
     iframeSrc = null;
     mapReady = false;
     lastRemoteProject = null;
+    mapSeq = 0;
+    lastSentSeq = 0;
     iframeWorkspace = state.active_workspace;
   }
 
@@ -91,6 +94,7 @@ function postProject() {
   if (!target) return;
   if (lastRemoteProject && sameProject(state.map_project, lastRemoteProject)) return;
   mapSeq += 1;
+  lastSentSeq = mapSeq;
   iframe.contentWindow.postMessage(
     { type: "geolibre:load-project", seq: mapSeq, project: state.map_project },
     target
@@ -112,13 +116,30 @@ function attachBridge() {
       reportBridge({ version: data.version || null, methods: BRIDGE_METHODS }).catch(() => {});
       postProject();
     } else if (data.type === "geolibre:state") {
+      // The app echoes the `seq` of the last load-project it applied. A lower
+      // seq is a state captured before our latest project reached it; posting
+      // that back would overwrite the newer server project with stale layers.
+      if (lastSentSeq === 0) return;
+      const seq = typeof data.seq === "number" ? data.seq : null;
+      if (seq !== null && seq < lastSentSeq) return;
       lastRemoteProject = data.project;
       // Track app-initiated edits (pan/zoom/layer edits) in the local project
       // too. Otherwise the next shell render posts the stale project back and
       // snaps the map to its previous view.
       if (data.project) {
         state.map_project = data.project;
-        setMapProject(data.project).catch(() => {});
+        setMapProject(data.project, state.map_revision, state.active_workspace)
+          .then((result) => {
+            if (!result || result.workspace_mismatch) return;
+            if (result.revision != null) state.map_revision = result.revision;
+            if (result.accepted === false && result.project) {
+              // Another tab or a tool changed the map first. Adopt the
+              // authoritative project and let syncMap push it to the iframe.
+              state.map_project = result.project;
+              syncMap();
+            }
+          })
+          .catch(() => {});
       }
     } else if (data.type === "geolibre:error") {
       const error = document.getElementById("map-error");

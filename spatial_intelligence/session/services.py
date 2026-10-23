@@ -79,6 +79,8 @@ class SessionServices:
         settings: Callable[[], dict],
         files_provider: Callable[[], list[str]],
         map_provider: Callable[[], dict],
+        map_revision: Callable[[], int] | None = None,
+        bump_map: Callable[[], int] | None = None,
         trace_length: Callable[[str], int] | None = None,
         base_url: str | None = None,
         vision: VisionService | None = None,
@@ -90,6 +92,8 @@ class SessionServices:
         self._settings = settings
         self._files_provider = files_provider
         self._map_provider = map_provider
+        self._map_revision = map_revision or (lambda: 0)
+        self._bump_map = bump_map or (lambda: 0)
         self._trace_length = trace_length
         self._base_url = base_url or server_base_url()
         self._vision = vision
@@ -141,7 +145,7 @@ class SessionServices:
             reporter=self._jobs.reporter(),
             events=RuntimeEvents(
                 files_changed=self._publish_files,
-                map_changed=self.map_notifier.notify,
+                map_changed=self._map_changed,
             ),
             base_url=self._base_url,
             approved=self._approval_granted(),
@@ -282,5 +286,13 @@ class SessionServices:
     def _publish_files(self) -> None:
         self._bus.publish("files", {"files": self._files_provider()})
 
+    def _map_changed(self) -> None:
+        """Record an authoritative map change before the throttled push."""
+        self._bump_map()
+        self.map_notifier.notify()
+
     def _publish_map(self) -> None:
-        self._bus.publish("map", {"project": self._map_provider()})
+        self._bus.publish(
+            "map",
+            {"project": self._map_provider(), "revision": self._map_revision()},
+        )

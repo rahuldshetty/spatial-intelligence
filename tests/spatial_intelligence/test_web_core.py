@@ -793,6 +793,40 @@ if (gated) {
   });
 }
 
+await scenario("map_capture", async () => {
+  const store = await import(webUrl("store.js"));
+  const source = eventSources.filter((item) => !item.closed && item.url === "/api/events").pop();
+  store.state.active_workspace = "ws1";
+  fetchCalls.length = 0;
+
+  source.emit(
+    "map_capture",
+    JSON.stringify({ id: "c1", token: "t1", workspace: "ws2" })
+  );
+  source.emit(
+    "map_bridge",
+    JSON.stringify({
+      id: "b1",
+      token: "t1",
+      workspace: "ws2",
+      method: "getDrawnFeatures",
+      params: {},
+    })
+  );
+  await tick();
+
+  eq(
+    "map.capture_other_workspace_is_silent",
+    fetchCalls.filter((call) => call.url.startsWith("/api/map/capture")).length,
+    0
+  );
+  eq(
+    "map.bridge_other_workspace_is_silent",
+    fetchCalls.filter((call) => call.url.startsWith("/api/map/bridge")).length,
+    0
+  );
+});
+
 await scenario("map", async () => {
   const store = await import(webUrl("store.js"));
   const map = await import(webUrl("pages/map.js"));
@@ -846,6 +880,22 @@ await scenario("map", async () => {
   posted.length = 0;
   sendMessage(ORIGIN, iframe.contentWindow, {
     type: "geolibre:state",
+    seq: 0,
+    project: { layers: [], view: { center: [1, 1] } },
+  });
+  await tick();
+  eq("map.ignores_stale_child_state", fetchCalls.filter((call) => call.url === "/api/map/project").length, 0);
+  eq(
+    "map.stale_state_does_not_replace_project",
+    store.state.map_project,
+    { view: { center: [0, 0] }, layers: [{ id: "a" }] }
+  );
+
+  fetchCalls.length = 0;
+  posted.length = 0;
+  sendMessage(ORIGIN, iframe.contentWindow, {
+    type: "geolibre:state",
+    seq: 1,
     project: { layers: [{ id: "a" }], view: { center: [0, 0] } },
   });
   await tick();

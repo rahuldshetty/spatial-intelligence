@@ -21,6 +21,7 @@ from ..agent.vision import VisionService
 from ..ai import profiles
 from ..contracts.errors import ToolInputError
 from ..map.bridge import reset_bridge
+from ..map import MAP_LOCK
 from ..settings import prefs
 from ..settings.env import DEFAULT_MODEL, list_workspaces, workspace_root
 from ..tools.runtime import ToolRuntime, bind
@@ -65,6 +66,8 @@ class AppState:
             settings=lambda: self.settings,
             files_provider=lambda: self.list_files(),
             map_provider=lambda: self.workspaces.project(),
+            map_revision=lambda: self.workspaces.map_revision,
+            bump_map=self.workspaces.bump_map_revision,
             trace_length=self._trace_length,
             vision=self.vision,
             capture=self.capture,
@@ -81,11 +84,16 @@ class AppState:
     def snapshot(self) -> dict:
         """Everything the browser needs to render the app from scratch."""
         with self.lock:
+            workspace = self.workspaces.workspace
             return {
-                "active_workspace": self.workspaces.name,
+                # Use the directory's actual name, not the name as typed on
+                # open. On a case-insensitive filesystem the two can differ,
+                # and the capture bridge compares this value verbatim.
+                "active_workspace": workspace.root.name if workspace is not None else None,
                 "workspaces": list_workspaces(),
                 "cells": self.notebook.cells(),
                 "map_project": self.workspaces.project(),
+                "map_revision": self.workspaces.map_revision,
                 "map_app_url": self.workspaces.map._app_url,
                 "files": self.list_files(),
                 "jobs": self.jobs.snapshot(),
@@ -281,11 +289,62 @@ class AppState:
             self.workspaces.save_map()
             return {"ok": True}
 
-    def set_map_project(self, project: dict) -> dict:
-        """Adopt a project pushed by the browser."""
-        with self.lock:
+    def set_map_project(
+        self,
+        project: dict,
+        *,
+        revision: int | None = None,
+        workspace: str | None = None,
+    ) -> dict:
+        """Adopt a project pushed by the browser.
+
+        The browser echoes its project on every map change, including changes
+        the server just made. Without a revision, a late echo can replace a
+        newer server project and drop the layer that was just added. A push is
+        accepted only when it is based on the current revision; a stale push
+        gets the authoritative project back so the tab can catch up.
+        """
+        with self.lock, MAP_LOCK:
+            active = self.workspaces.workspace
+            if active is None:
+                raise ValueError("no workspace open")
+            active_name = active.root.name
+            if workspace is not None and workspace != active_name:
+                return {
+                    "ok": True,
+                    "accepted": False,
+                    "workspace_mismatch": True,
+                    "workspace": active_name,
+                }
+            current = self.workspaces.map_revision
+            if revision is not None and revision != current:
+                return {
+                    "ok": True,
+                    "accepted": False,
+                    "revision": current,
+                    "project": self.workspaces.project(),
+                }
+            if project == self.workspaces.project():
+                # An echo of the project the browser already has: nothing to
+                # adopt, but still make sure the workspace snapshot exists.
+                self.workspaces.save_map()
+                return {"ok": True, "accepted": True, "revision": current}
             self.workspaces.set_map_project(project)
-            return {"ok": True}
+            event = self._map_event()
+            self.bus.publish("map", event)
+            return {
+                "ok": True,
+                "accepted": True,
+                "revision": event["revision"],
+            }
+
+    def _map_event(self) -> dict:
+        """Return the SSE map payload for the current project."""
+        with MAP_LOCK:
+            return {
+                "project": self.workspaces.project(),
+                "revision": self.workspaces.map_revision,
+            }
 
     # -- cells -----------------------------------------------------------
 
@@ -415,13 +474,14 @@ class AppState:
         from ..map.layers import remove_local_sources
         from ..workspace import files as fileops
 
-        with self.lock:
+        with self.lock, MAP_LOCK:
             workspace = self._require_workspace()
             relative = fileops.delete_file(workspace, path)
             removed = remove_local_sources(self.workspaces.map, workspace, relative)
             if removed:
                 self.workspaces.save_map()
-                self.bus.publish("map", {"project": self.workspaces.project()})
+                self.workspaces.bump_map_revision()
+                self.bus.publish("map", self._map_event())
             self.bus.publish("files", {"files": self.list_files()})
             return self.snapshot()
 
@@ -430,7 +490,7 @@ class AppState:
         from ..map.layers import rename_local_sources
         from ..workspace import files as fileops
 
-        with self.lock:
+        with self.lock, MAP_LOCK:
             workspace = self._require_workspace()
             old_rel, new_rel = fileops.rename_file(workspace, path, name)
             changed = 0
@@ -441,7 +501,8 @@ class AppState:
                 )
             if changed:
                 self.workspaces.save_map()
-                self.bus.publish("map", {"project": self.workspaces.project()})
+                self.workspaces.bump_map_revision()
+                self.bus.publish("map", self._map_event())
             self.bus.publish("files", {"files": self.list_files()})
             return self.snapshot()
 
@@ -528,7 +589,7 @@ class AppState:
                     self.notebook.save()
                     self.bus.publish("cell", cell)
             self.services.flush()
-            self.bus.publish("map", {"project": self.workspaces.project()})
+            self.bus.publish("map", self._map_event())
             self.bus.publish("files", {"files": self.list_files()})
 
     def _execute_python(self, cell_id: str, source: str, runtime: ToolRuntime) -> None:

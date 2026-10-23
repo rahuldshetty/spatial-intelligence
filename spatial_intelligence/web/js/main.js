@@ -9,6 +9,7 @@ import {
   saveWorkspace,
   sendMapBridge,
   sendMapCapture,
+  updateCell,
 } from "./api.js";
 import { bridgeRequest } from "./bridge.js";
 import { closeAllMenus } from "./components/menubar.js";
@@ -74,19 +75,48 @@ function handleShortcut(event) {
   } else if (event.key === "Enter") {
     event.preventDefault();
     if (event.shiftKey) {
-      runAll()
+      persistFocusedCell()
+        .then(() => runAll())
         .then(jump)
         .catch((error) => toast(error.message || String(error), "error"));
       return;
     }
-    const cell = document.activeElement && document.activeElement.closest(".cell");
-    const cellId = cell && cell.getAttribute("data-cell-id");
-    if (cellId) {
-      runCell(cellId)
-        .then(jump)
-        .catch((error) => toast(error.message || String(error), "error"));
-    }
+    runFocusedCell().catch((error) => toast(error.message || String(error), "error"));
   }
+}
+
+/**
+ * Save the focused cell textarea before a keyboard run.
+ *
+ * The editor updates local state on every input, but the server only receives
+ * the source on blur. Ctrl+Enter does not blur, so the run used to start with
+ * the previous source — often an empty prompt — and the rerender wiped what
+ * was typed. Await the update so the queued run reads the same text.
+ */
+async function persistFocusedCell() {
+  const active = document.activeElement;
+  const cell =
+    active && typeof active.closest === "function" ? active.closest(".cell") : null;
+  const cellId = cell && cell.getAttribute("data-cell-id");
+  if (!cellId) return null;
+  if (
+    active &&
+    active.tagName === "TEXTAREA" &&
+    !active.readOnly &&
+    typeof active.value === "string"
+  ) {
+    const index = state.cells.findIndex((item) => item.id === cellId);
+    if (index >= 0) state.cells[index].source = active.value;
+    await updateCell(cellId, active.value);
+  }
+  return cellId;
+}
+
+function runFocusedCell() {
+  return persistFocusedCell().then((cellId) => {
+    if (!cellId) return null;
+    return runCell(cellId).then(() => jump());
+  });
 }
 
 async function loadState() {

@@ -289,6 +289,7 @@ const document = {
   readyState: "complete",
   documentElement,
   body,
+  activeElement: null,
   createElement: (tag) => new ShimNode(tag),
   createTextNode: (value) => textNode(value),
   getElementById: (id) => documentElement.descendants([]).find((node) => node.getAttribute("id") === id) || null,
@@ -793,6 +794,60 @@ if (gated) {
   });
 }
 
+await scenario("shortcut", async () => {
+  const store = await import(webUrl("store.js"));
+  store.state.active_workspace = "demo";
+  store.state.cells = [{ id: "p1", kind: "prompt", source: "" }];
+
+  const cell = document.createElement("div");
+  cell.className = "cell";
+  cell.setAttribute("data-cell-id", "p1");
+  const editor = document.createElement("textarea");
+  editor.value = "find the ships";
+  cell.append(editor);
+  document.body.append(cell);
+  document.activeElement = editor;
+
+  fetchCalls.length = 0;
+  fetchResponder = () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({}),
+  });
+  for (const handler of documentListeners.get("keydown") || []) {
+    handler({
+      key: "Enter",
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault() {},
+    });
+  }
+  await tick();
+  await tick();
+
+  eq(
+    "shortcut.persists_then_runs",
+    fetchCalls.map((call) => [call.method, call.url]),
+    [
+      ["PUT", "/api/cells/p1"],
+      ["POST", "/api/cells/p1/run"],
+    ]
+  );
+  eq(
+    "shortcut.saves_the_typed_prompt",
+    JSON.parse(fetchCalls[0].body),
+    { source: "find the ships" }
+  );
+  eq("shortcut.updates_local_source", store.state.cells[0].source, "find the ships");
+
+  document.activeElement = null;
+  cell.remove();
+  const scroll = await import(webUrl("scroll.js"));
+  scroll.unfollow();
+});
+
 await scenario("map_capture", async () => {
   const store = await import(webUrl("store.js"));
   const source = eventSources.filter((item) => !item.closed && item.url === "/api/events").pop();
@@ -1068,6 +1123,9 @@ class FrontendCoreTests(unittest.TestCase):
 
     def test_map_bridge(self) -> None:
         self.assert_group("map.")
+
+    def test_run_shortcut(self) -> None:
+        self.assert_group("shortcut.")
 
     def test_scroll_following(self) -> None:
         self.assert_group("scroll.")

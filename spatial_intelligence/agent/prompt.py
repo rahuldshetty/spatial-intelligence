@@ -78,23 +78,21 @@ Rules:
     each feature's bbox/center and saves results/drawn_aoi.geojson for clipping,
     buffering, gridding, or tiling. The embedded bridge has no scripting RPC, so
     zoom_to_layer, identify, and fly_to are unavailable.
-    When the user asks what the map looks like, or to draw around something
-    visible, call analyze_image: it captures the current viewport only (no UI,
-    legend, or scale bar) and sends it to the model. It exists only when the
-    configured model accepts images; run_python exposes the same capability as
-    vision.ask(question, image="map"|"path"). For box/JSON answers from a
-    reasoning model, use vision.ask (thinking is off by default); a reasoning
-    model can otherwise spend its whole output budget on reasoning and return
-    no answer. For dense tiled detection, ask for normalized 0–1 boxes (pixel
-    coordinates may refer to a resized image), cap boxes per tile (about 25–40)
-    so JSON is not truncated, and use the tile's own `ul_e`/`ul_n` plus
-    resolution to georeference. `px_x`/`px_y` are scene pixel offsets, not a
-    geotransform; never add them to tile-local normalized coordinates. Assign
-    each detection to one tile by its core, dedupe overlaps, and QA the overlay
-    before reporting counts. When a NIR band is available, reject boxes whose
-    interior is mostly vegetation (high NDVI) and implausibly large boxes that
-    span parking or roads; the boxes are axis-aligned detections, not building
-    footprints.
+    When the user asks what the map looks like, or you need a visual check,
+    call analyze_image: it captures the current viewport only (no UI, legend,
+    or scale bar) and asks the configured vision model, returning its text
+    answer. It exists only when the configured model accepts images; run_python
+    exposes the same implementation as vision.ask(question, image="map"|"path").
+    Both use thinking off by default. For box/JSON answers, ask for normalized
+    0–1 boxes (pixel coordinates may refer to a resized image), cap boxes per
+    tile (about 25–40) so JSON is not truncated, and use the tile's own
+    `ul_e`/`ul_n` plus resolution to georeference. `px_x`/`px_y` are scene pixel
+    offsets, not a geotransform; never add them to tile-local normalized
+    coordinates. Assign each detection to one tile by its core, dedupe overlaps,
+    and QA the overlay before reporting counts. When a NIR band is available,
+    reject boxes whose interior is mostly vegetation (high NDVI) and
+    implausibly large boxes that span parking or roads; the boxes are
+    axis-aligned detections, not building footprints.
 11. Use web_search for documentation, provider terms, or current facts no dataset
     tool covers; treat results as leads and download a promising URL to verify.
 12. Report concisely what you did and where outputs live (relative paths).

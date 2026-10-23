@@ -44,10 +44,9 @@ import shapely
 import skimage
 import xarray
 
-from ..agent.imaging import encode_capture, load_image
+from ..agent.image_analysis import analyze_image_source
 from ..ai.store import models_dir
-from ..contracts.errors import ToolInputError
-from ..contracts.services import CAPTURE_SERVICE, VISION_SERVICE
+from ..contracts.services import VISION_SERVICE
 from ..workspace import Workspace
 from . import packages
 from .output import OutputStore
@@ -104,10 +103,11 @@ class _ConfinedWorkspace:
 class _VisionFacade:
     """Ask the configured vision model about the map or a workspace image.
 
-    This is the Python-side form of the ``analyze_image`` tool: it returns text,
-    not an image part, so a snippet can loop over tiles and parse JSON boxes.
-    Only workspace paths and the live map are accepted; there is no arbitrary
-    URL or raw bytes entry point.
+    This and the ``analyze_image`` tool call the same implementation
+    (:func:`analyze_image_source`) and return its text answer. A snippet can
+    loop over tiles and parse JSON boxes without adding images to the main
+    conversation. Only workspace paths and the live map are accepted; there is
+    no arbitrary URL or raw bytes entry point.
     """
 
     def __init__(self, workspace: Workspace, services: dict) -> None:
@@ -135,39 +135,13 @@ class _VisionFacade:
         is DeepSeek's reasoning switch; it defaults off so JSON/box answers are
         not lost to reasoning, and is ignored by other providers.
         """
-        service = self._services.get(VISION_SERVICE)
-        if service is None:
-            raise ToolInputError(
-                "image input is not configured for this session; reopen the "
-                "workspace after enabling a vision-capable model"
-            )
-        if not service.supported:
-            raise ToolInputError(
-                "image input is not available for the configured model; "
-                "choose a vision-capable OpenAI-compatible model"
-            )
-        question = (question or "").strip()
-        if not question:
-            raise ToolInputError("question is required")
-        limit = max(256, min(int(max_side), 2048))
-        source = (image or "map").strip()
-        if source == "map":
-            if bands:
-                raise ToolInputError(
-                    "bands only applies to a raster image, not the live map capture"
-                )
-            broker = self._services.get(CAPTURE_SERVICE)
-            if broker is None:
-                raise ToolInputError("the map capture service is not available")
-            capture = broker.request(workspace=self._workspace.root.name)
-            data, _, _ = encode_capture(capture.image, limit)
-        else:
-            path = self._workspace.resolve(source, must_exist=True)
-            data, _, _, _, _, _ = load_image(path, limit, bands)
-        return service.ask(
+        return analyze_image_source(
             question,
-            data,
-            "image/jpeg",
+            source=image,
+            workspace=self._workspace,
+            services=self._services,
+            max_side=max_side,
+            bands=bands,
             thinking=thinking,
             max_tokens=max_tokens,
         )

@@ -21,9 +21,8 @@ hiddenimports = [
     # dotenv is imported inside a try/except in settings/env.py; without it a
     # user's .env file would be ignored entirely in a frozen build.
     "dotenv",
-    # Orthority is imported lazily by the orthorectification service, and its
-    # OpenCV dependency carries binaries that need the cv2 hook.
-    "orthority",
+    # Orthority is imported lazily by the orthorectification service; its
+    # submodules come from collect_all below. OpenCV binaries need the cv2 hook.
     "cv2",
 ]
 

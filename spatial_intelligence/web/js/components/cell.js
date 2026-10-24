@@ -3,7 +3,7 @@
 import { confirmDialog, el, expandableContent, toast, usageLabel, usageTitle } from "../dom.js";
 import { moveCell, runCell, stopCell, updateCell } from "../api.js";
 import { icon } from "../icons.js";
-import { state } from "../store.js";
+import { applySnapshot, state } from "../store.js";
 import { cellOutputText, renderMarkdown } from "./markdown.js";
 import { renderTrace } from "./trace.js";
 import { jump } from "../scroll.js";
@@ -45,7 +45,7 @@ function confirmDeleteCell(cell) {
   });
 }
 
-function headButton(name, title, onclick, className = "icon") {
+function headButton(name, title, onclick, className = "icon", disabled = false) {
   const button = el("button", {
     class: className,
     type: "button",
@@ -54,6 +54,7 @@ function headButton(name, title, onclick, className = "icon") {
     onclick,
   });
   button.append(icon(name, { size: 14 }));
+  if (disabled) button.disabled = true;
   return button;
 }
 
@@ -112,9 +113,26 @@ function renderHeader(cell, kind, geoai, generated) {
   } else if (kind === "tool") {
     actions.append(headButton("trash-2", "Delete", () => confirmDeleteCell(cell)));
   } else {
+    const index = state.cells.findIndex((item) => item.id === cell.id);
+    const move = async (direction) => {
+      const snapshot = await moveCell(cell.id, direction);
+      if (snapshot) applySnapshot(snapshot);
+    };
     actions.append(
-      headButton("chevron-up", "Move up", () => act(() => moveCell(cell.id, -1))),
-      headButton("chevron-down", "Move down", () => act(() => moveCell(cell.id, 1))),
+      headButton(
+        "chevron-up",
+        "Move up",
+        () => act(() => move(-1)),
+        "icon",
+        index <= 0
+      ),
+      headButton(
+        "chevron-down",
+        "Move down",
+        () => act(() => move(1)),
+        "icon",
+        index < 0 || index >= state.cells.length - 1
+      ),
       headButton("trash-2", "Delete", () => confirmDeleteCell(cell))
     );
   }

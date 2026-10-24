@@ -1,24 +1,21 @@
 """Build an orthomosaic from raw drone frames with Orthority.
 
-Orthority is a default dependency (AGPL-3.0-or-later). Nothing here imports it
-until the user actually asks for an orthomosaic, so detection and the normal
-import path stay cheap.
-
-Orthority orthorectifies one frame at a time. This module runs it over all
-selected frames against the supplied DEM and then merges the per-frame orthos
-into one COG. The merge is a simple first-valid-pixel mosaic; it does not
-bundle-adjust camera poses or blend seams, so accuracy is bounded by the
-capture metadata and DEM.
+Orthority (AGPL-3.0-or-later) is imported only when a mosaic is requested.
+Each frame is orthorectified against the DEM and the results are merged into one
+COG with a first-valid-pixel mosaic; there is no bundle adjustment or seam
+blending, so accuracy is bounded by the capture metadata and DEM.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import re
 import shutil
 import warnings
-from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from collections.abc import Callable, Iterable
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import rasterio
@@ -33,47 +30,66 @@ from ..workspace import Workspace
 #: does bundle adjustment and is not limited by one HTTP request.
 MAX_PHOTOS = 200
 
-#: Names that mark a single-band raster as an elevation model.
-_DEM_HINTS = ("dsm", "dtm", "dem", "elevation", "surface", "terrain", "height")
+#: Refuse to merge more than this much raster data: ``merge`` loads every frame
+#: at once, and writing the filled array roughly doubles the peak.
+MAX_MERGE_BYTES = 768 * 1024 * 1024
+
+Progress = Callable[[int, int, str], None]
+Cancelled = Callable[[], bool]
 
 
 def available() -> bool:
-    """Whether Orthority is installed in this environment."""
     return importlib.util.find_spec("orthority") is not None
 
 
 def install_hint() -> str:
-    """One actionable sentence for the UI when Orthority is missing."""
     return (
         "Orthority is missing from this install; reinstall spatial-intelligence "
         "so its default orthorectification dependency is present"
     )
 
 
-def prepare_orthomosaic(workspace: Workspace, paths: Iterable[str]) -> dict[str, Any]:
-    """Detect a photo/DEM selection and build its orthomosaic.
+def _check_cancelled(cancelled: Cancelled | None) -> None:
+    if cancelled is not None and cancelled():
+        raise ToolInputError("orthorectification cancelled")
 
-    This is the slow, map-free half of the import. ``app_state`` calls it before
-    taking the session/map locks, so a long Orthority run does not block state
-    polling or the rest of the UI.
-    """
+
+def prepare_orthomosaic(
+    workspace: Workspace,
+    paths: Iterable[str],
+    *,
+    detected: dict[str, Any] | None = None,
+    progress: Progress | None = None,
+    cancelled: Cancelled | None = None,
+) -> dict[str, Any]:
+    """Detect the selection (unless given) and build its orthomosaic."""
     from . import drone
 
-    detected = drone.detect_files(workspace, paths)
+    detected = (
+        detected if detected is not None else drone.detect_files(workspace, paths)
+    )
     status = detected["orthorectify"]
     if not status.get("available"):
-        raise ToolInputError(status.get("reason") or "this selection cannot be orthorectified")
+        raise ToolInputError(
+            status.get("reason") or "this selection cannot be orthorectified"
+        )
     photos = [
-        workspace.resolve(item, must_exist=True) for item in status.get("photo_paths", [])
+        workspace.resolve(item, must_exist=True)
+        for item in status.get("photo_paths", [])
     ]
     dem = workspace.resolve(status["dem"], must_exist=True)
-    return orthorectify(workspace, photos, dem)
+    return orthorectify(
+        workspace, photos, dem, progress=progress, cancelled=cancelled
+    )
 
 
 def orthorectify(
     workspace: Workspace,
     photos: Iterable[Path],
     dem: Path,
+    *,
+    progress: Progress | None = None,
+    cancelled: Cancelled | None = None,
 ) -> dict[str, Any]:
     """Orthorectify ``photos`` against ``dem`` and merge them into one COG."""
     if not available():
@@ -89,6 +105,7 @@ def orthorectify(
         )
     if not dem.is_file():
         raise ToolInputError(f"DEM does not exist: {dem}")
+    _check_cancelled(cancelled)
 
     try:
         from orthority.errors import OrthorityError, OrthorityWarning
@@ -97,13 +114,7 @@ def orthorectify(
     except ImportError as exc:  # pragma: no cover - guarded by available()
         raise ToolInputError(install_hint()) from exc
 
-    with rasterio.open(dem) as dataset:
-        dem_crs = dataset.crs
-        dem_band = 1
-    if dem_crs is None:
-        raise ToolInputError("the DEM has no CRS, so it cannot anchor an orthomosaic")
-
-    dataset_name = _dataset_name(photo_files)
+    dataset_name = _dataset_name(workspace, photo_files)
     target = workspace.resolve(
         f"results/drone/{dataset_name}/orthomosaic.tif", write=True
     )
@@ -113,62 +124,75 @@ def orthorectify(
         shutil.rmtree(frames_dir)
     frames_dir.mkdir(parents=True)
 
+    total = len(photo_files)
+    frame_files: list[Path] = []
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", NotGeoreferencedWarning)
-            warnings.simplefilter("ignore", OrthorityWarning)
-            # Orthority 0.7 uses the deprecated Affine ``*`` operator internally.
-            warnings.simplefilter("ignore", PendingDeprecationWarning)
-            try:
-                cameras = FrameCameras.from_images(
-                    [str(path) for path in photo_files],
-                    io_kwargs={"crs": dem_crs, "progress": False},
-                    cam_kwargs={"distort": True, "alpha": 1},
-                )
-            except (OrthorityError, FileNotFoundError, ValueError) as exc:
+        with rasterio.open(dem) as dem_dataset:
+            if dem_dataset.crs is None:
                 raise ToolInputError(
-                    "Orthority could not read camera parameters from the photos: "
-                    f"{exc}. The frames need EXIF/XMP GPS, orientation, and camera "
-                    "intrinsics (for DJI, DewarpData or focal-length tags)."
-                ) from exc
-
-            out_crs = cameras.crs or dem_crs
-            frame_files: list[Path] = []
-            for index, photo in enumerate(photo_files, start=1):
+                    "the DEM has no CRS, so it cannot anchor an orthomosaic"
+                )
+            dem_crs = dem_dataset.crs
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", NotGeoreferencedWarning)
+                warnings.simplefilter("ignore", OrthorityWarning)
+                # Orthority 0.7 uses the deprecated Affine ``*`` operator internally.
+                warnings.simplefilter("ignore", PendingDeprecationWarning)
                 try:
-                    camera = cameras.get(str(photo))
-                    with rasterio.open(photo) as source, rasterio.open(dem) as dem_dataset:
-                        ortho = Ortho(
-                            source,
-                            dem_dataset,
-                            camera,
-                            crs=out_crs,
-                            dem_band=dem_band,
-                        )
-                        frame = frames_dir / f"{index:04d}-{photo.stem}_ORTHO.tif"
-                        ortho.process(
-                            str(frame),
-                            driver="cog",
-                            overwrite=True,
-                            progress=False,
-                        )
-                        frame_files.append(frame)
-                except (OrthorityError, OSError, ValueError) as exc:
+                    cameras = FrameCameras.from_images(
+                        [str(path) for path in photo_files],
+                        io_kwargs={"crs": dem_crs, "progress": False},
+                        cam_kwargs={"distort": True, "alpha": 1},
+                    )
+                except (OrthorityError, FileNotFoundError, ValueError) as exc:
                     raise ToolInputError(
-                        f"could not orthorectify {photo.name}: {exc}"
+                        "Orthority could not read camera parameters from the photos: "
+                        f"{exc}. The frames need EXIF/XMP GPS, orientation, and camera "
+                        "intrinsics (for DJI, DewarpData or focal-length tags)."
                     ) from exc
 
-            _merge_frames(frame_files, target)
+                out_crs = cameras.crs or dem_crs
+                for index, photo in enumerate(photo_files, start=1):
+                    _check_cancelled(cancelled)
+                    try:
+                        camera = cameras.get(str(photo))
+                        with rasterio.open(photo) as source:
+                            ortho = Ortho(
+                                source,
+                                dem_dataset,
+                                camera,
+                                crs=out_crs,
+                                dem_band=1,
+                            )
+                            frame = frames_dir / f"{index:04d}-{photo.stem}_ORTHO.tif"
+                            ortho.process(
+                                str(frame),
+                                driver="cog",
+                                overwrite=True,
+                                progress=False,
+                            )
+                            frame_files.append(frame)
+                    except (OrthorityError, OSError, ValueError) as exc:
+                        raise ToolInputError(
+                            f"could not orthorectify {photo.name}: {exc}"
+                        ) from exc
+                    if progress is not None:
+                        progress(
+                            index, total, f"frame {index}/{total}: {photo.name}"
+                        )
 
-        with rasterio.open(target) as dataset:
-            bounds = dataset.bounds
-            crs = dataset.crs
-            resolution = [abs(dataset.transform.a), abs(dataset.transform.e)]
-            west, south, east, north = transform_bounds(
-                crs, "EPSG:4326", *bounds, densify_pts=21
-            )
+                _check_cancelled(cancelled)
+                _merge_frames(frame_files, target)
     finally:
         shutil.rmtree(frames_dir, ignore_errors=True)
+
+    with rasterio.open(target) as dataset:
+        bounds = dataset.bounds
+        crs = dataset.crs
+        resolution = [abs(dataset.transform.a), abs(dataset.transform.e)]
+        west, south, east, north = transform_bounds(
+            crs, "EPSG:4326", *bounds, densify_pts=21
+        )
 
     relative = workspace.relative(target)
     workspace.record_output(relative)
@@ -186,12 +210,30 @@ def _merge_frames(frames: list[Path], target: Path) -> None:
     """Merge per-frame orthos into one masked COG."""
     if not frames:
         raise ToolInputError("Orthority produced no ortho images")
-    sources = [rasterio.open(frame) for frame in frames]
+    sources: list[rasterio.DatasetReader] = []
+    total_bytes = 0
     try:
+        for frame in frames:
+            source = rasterio.open(frame)
+            sources.append(source)
+            item_size = np.dtype(source.dtypes[0]).itemsize
+            total_bytes += source.width * source.height * source.count * item_size
+        if total_bytes > MAX_MERGE_BYTES:
+            raise ToolInputError(
+                f"the orthomosaic would need {total_bytes // (1024 * 1024)} MiB "
+                f"to merge (limit {MAX_MERGE_BYTES // (1024 * 1024)} MiB); "
+                "use ODM/WebODM for a survey this large"
+            )
         array, transform = merge(sources, masked=True)
         if not np.ma.isMaskedArray(array):
             array = np.ma.masked_array(array, mask=np.zeros(array.shape, dtype=bool))
         profile = sources[0].profile.copy()
+        fill = profile.get("nodata")
+        if fill is None:
+            fill = 0
+        profile.pop("tiled", None)
+        profile.pop("blockxsize", None)
+        profile.pop("blockysize", None)
         profile.update(
             width=array.shape[2],
             height=array.shape[1],
@@ -199,14 +241,12 @@ def _merge_frames(frames: list[Path], target: Path) -> None:
             count=array.shape[0],
             dtype=array.dtype,
             driver="COG",
-            tiled=True,
-            blockxsize=512,
-            blockysize=512,
+            BLOCKSIZE=512,
             compress="deflate",
             BIGTIFF="YES",
         )
         with rasterio.open(target, "w", **profile) as dataset:
-            dataset.write(array.filled(0))
+            dataset.write(array.filled(fill))
             mask = np.ma.getmaskarray(array)
             if mask.any():
                 dataset.write_mask(~mask.any(axis=0))
@@ -215,31 +255,22 @@ def _merge_frames(frames: list[Path], target: Path) -> None:
             source.close()
 
 
-def _dataset_name(photos: list[Path]) -> str:
-    """A stable output folder name from the capture folder, else ``drone``."""
+def _dataset_name(workspace: Workspace, photos: list[Path]) -> str:
+    """A stable output folder name, unique across unrelated selections."""
     parents = {photo.parent for photo in photos}
-    folder = str(sorted(parents)[0].name) if len(parents) == 1 else "drone"
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", folder).strip("-") or "drone"
-    return slug
-
-
-def is_dem(record: dict[str, Any]) -> bool:
-    """Whether a detected raster record looks like an elevation model."""
-    if record.get("kind") != "raster":
-        return False
-    if record.get("role") == "dem":
-        return True
-    name = PurePosixPath(str(record.get("path", ""))).stem.lower()
-    if any(hint in name for hint in _DEM_HINTS):
-        return True
-    return int(record.get("bands") or 0) == 1
+    if len(parents) == 1:
+        folder = workspace.relative(next(iter(parents)))
+    else:
+        joined = "\n".join(sorted(str(parent) for parent in parents))
+        folder = "drone-" + hashlib.sha1(joined.encode("utf-8")).hexdigest()[:8]
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", folder).strip("-") or "drone"
 
 
 __all__ = [
+    "MAX_MERGE_BYTES",
     "MAX_PHOTOS",
     "available",
     "install_hint",
-    "is_dem",
     "orthorectify",
     "prepare_orthomosaic",
 ]

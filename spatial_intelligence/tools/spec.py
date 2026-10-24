@@ -193,10 +193,8 @@ class ToolDeclaration:
                 _first(self.requires_approval, defaults.requires_approval, False)
             ),
             timeout=self.timeout,
-            # Map mutations are read-copy-reassign operations on one shared
-            # project. Running two in parallel (pydantic-ai does by default)
-            # lets one overwrite the other's layer, so they are barriers even
-            # unless a pack explicitly says otherwise.
+            # Map mutations are read-copy-reassign on one shared project, so
+            # they run as barriers.
             sequential=bool(_first(self.sequential, defaults.sequential, False))
             or Effect.MAP_WRITE in effects,
             capabilities=tuple(defaults.capabilities) + tuple(self.capabilities),

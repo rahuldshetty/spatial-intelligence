@@ -1,20 +1,7 @@
-"""Detect drone imagery in the workspace and add it to the live map.
+"""Detect drone imagery in a workspace and add it to the live map.
 
-Detection is deliberately cheap: a GeoTIFF is inspected through rasterio's
-header (CRS and bounds), and a photo through Pillow's EXIF/XMP header. No pixel
-data is decoded while listing files, so importing a folder of photos does not
-turn into an image-processing job before the user confirms anything.
-
-Two public entry points:
-
-``detect_files``
-    Return the supported files in a selection. Photos need a GPS position;
-    rasters need a georeferencing CRS. Everything else is skipped.
-
-``import_files``
-    Add the detected rasters and photo points to the live GeoLibre map. Photo
-    points are written as GeoJSON under ``results/`` and added with the same
-    layer service the agent uses, so the map is persisted and reloadable.
+Detection reads headers only: a raster's CRS/bounds through rasterio, a photo's
+EXIF/XMP through Pillow. No pixels are decoded before the user confirms.
 """
 
 from __future__ import annotations
@@ -25,8 +12,9 @@ import re
 import warnings
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any
 
 import rasterio
 from PIL import Image, UnidentifiedImageError
@@ -34,8 +22,11 @@ from rasterio.errors import NotGeoreferencedWarning
 from rasterio.warp import transform_bounds
 
 from ..contracts.errors import ToolInputError
+from ..map import document as map_document
+from ..map import layers as layerops
 from ..workspace import Workspace
 from . import orthorectify as ortho_service
+from . import raster
 
 #: Photo containers Pillow can read a header from. TIFF is included because
 #: some drone cameras write TIFF frames with EXIF/XMP instead of JPEG.
@@ -63,8 +54,17 @@ DRONE_MAKES = (
 #: XMP lives in an APP1 segment, which Pillow exposes through ``info["xmp"]``.
 XMP_TAG = 700
 
+#: Cap the files inspected so a mis-selected workspace root cannot turn
+#: detection into an unbounded scan. The walk stops at the cap.
+MAX_SCAN_FILES = 5000
+
+#: XMP packets are a few kilobytes; anything larger is malformed or hostile and
+#: is not handed to the XML parser.
+MAX_XMP_BYTES = 1_048_576
+
 #: EXIF IFD and tag ids used here. Named for readability at the call site.
 GPS_IFD = 34853
+EXIF_IFD = 34665
 EXIF_MAKE = 271
 EXIF_MODEL = 272
 EXIF_DATETIME = 36867
@@ -109,7 +109,7 @@ def detect_files(workspace: Workspace, paths: Iterable[str]) -> dict[str, Any]:
     shaped for the import dialog: one row per file plus counts and a union
     bounding box.
     """
-    sources = _candidate_paths(workspace, paths)
+    sources, truncated = _candidate_paths(workspace, paths)
     files: list[dict[str, Any]] = []
     skipped = 0
     for source in sources:
@@ -129,6 +129,7 @@ def detect_files(workspace: Workspace, paths: Iterable[str]) -> dict[str, Any]:
         "photos": photos,
         "rasters": rasters,
         "skipped": skipped,
+        "truncated": truncated,
         "bounds": _union_bounds(files),
         "orthorectify": _orthorectify_status(files),
     }
@@ -137,94 +138,96 @@ def detect_files(workspace: Workspace, paths: Iterable[str]) -> dict[str, Any]:
 def import_files(
     workspace: Workspace,
     map_obj: Any,
-    file_url: Any,
+    file_url: Callable[[str], str],
     paths: Iterable[str],
     *,
     orthorectify: bool = False,
     prepared: dict[str, Any] | None = None,
+    detected: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Add detected rasters and photos to the live map.
 
-    Rasters are added through :func:`spatial_intelligence.map.layers.add_raster`,
-    which already converts a striped GeoTIFF to a COG. Photos are grouped by
-    their parent folder and written as one GeoJSON point layer per group.
-
-    When ``orthorectify`` is set, raw frames and the DEM are first turned into
-    an orthomosaic (see :mod:`spatial_intelligence.geo.orthorectify`). Callers
-    that want the slow work outside the session lock pass the already-built
-    result as ``prepared``.
+    ``detected``/``prepared`` reuse work already done outside the map lock.
+    A source that is already on the map is updated or reused instead of being
+    added twice, and a failure removes the layers this call added.
     """
-    detected = detect_files(workspace, paths)
-    files = detected["files"]
-    if not files:
-        return {
-            "layers": [],
-            "photos": 0,
-            "rasters": 0,
-            "bounds": None,
-            "orthorectified": None,
-        }
-
+    detected = detected if detected is not None else detect_files(workspace, paths)
+    files = list(detected["files"])
     if orthorectify:
         if prepared is None:
             prepared = ortho_service.prepare_orthomosaic(workspace, paths)
         generated = detect_files(workspace, [prepared["path"]])["files"]
         if not generated:
             raise ToolInputError("the generated orthomosaic is not a readable raster")
-        files = [*files, *generated]
-
-    from ..map import layers as layerops
+        files.extend(generated)
 
     layers: list[dict[str, Any]] = []
+    added_ids: list[str] = []
     rasters = [item for item in files if item["kind"] == "raster"]
     photos = [item for item in files if item["kind"] == "photo"]
 
-    for record in rasters:
-        source = workspace.resolve(record["path"], must_exist=True)
-        layer_id = layerops.add_raster(
-            workspace,
-            map_obj,
-            record["path"],
-            _raster_layer_name(record),
-            bands=_rgb_bands(source),
-            file_url=file_url,
-        )
-        layers.append(
-            {
-                "id": layer_id,
-                "name": _raster_layer_name(record),
-                "kind": "raster",
-                "path": record["path"],
-            }
-        )
+    try:
+        for record in rasters:
+            source = workspace.resolve(record["path"], must_exist=True)
+            loadable, _ = raster.to_cog_if_needed(workspace, record["path"])
+            relative = workspace.relative(loadable)
+            existing = _layer_for_source(map_obj, relative)
+            if existing is not None:
+                layers.append(_layer_summary(existing, "raster", relative))
+                continue
+            name = _unique_name(map_obj, _raster_layer_name(record), relative)
+            layer_id = layerops.add_raster(
+                workspace,
+                map_obj,
+                relative,
+                name,
+                bands=_rgb_bands(source),
+                file_url=file_url,
+            )
+            added_ids.append(layer_id)
+            layers.append(
+                {"id": layer_id, "name": name, "kind": "raster", "path": relative}
+            )
 
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for record in photos:
-        groups[str(PurePosixPath(record["path"]).parent)].append(record)
-    for parent, records in sorted(groups.items()):
-        geojson = _photo_geojson(records)
-        relative = _write_photo_geojson(workspace, parent, geojson)
-        name = _photo_layer_name(parent)
-        layer_id = layerops.add_geojson(
-            workspace,
-            map_obj,
-            relative,
-            name,
-            style={
-                "fillColor": "#f59e0b",
-                "strokeColor": "#b45309",
-                "circleRadius": 6,
-                "fillOpacity": 0.85,
-            },
-        )
-        layers.append(
-            {
-                "id": layer_id,
-                "name": name,
-                "kind": "photos",
-                "path": relative,
-            }
-        )
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for record in photos:
+            groups[str(PurePosixPath(record["path"]).parent)].append(record)
+        for parent, records in sorted(groups.items()):
+            collection = _photo_geojson(records)
+            relative = _write_photo_geojson(workspace, parent, collection)
+            existing = _layer_for_source(map_obj, relative)
+            if existing is not None:
+                existing["geojson"] = collection
+                map_document.persist_map(map_obj, workspace)
+                layers.append(_layer_summary(existing, "photos", relative))
+                continue
+            name = _unique_name(map_obj, _photo_layer_name(parent), relative)
+            layer_id = layerops.add_geojson(
+                workspace,
+                map_obj,
+                relative,
+                name,
+                style={
+                    "fillColor": "#f59e0b",
+                    "strokeColor": "#b45309",
+                    "circleRadius": 6,
+                    "fillOpacity": 0.85,
+                },
+                source=relative,
+            )
+            added_ids.append(layer_id)
+            layers.append(
+                {"id": layer_id, "name": name, "kind": "photos", "path": relative}
+            )
+    except Exception:
+        for layer_id in reversed(added_ids):
+            try:
+                layerops.remove_layer(workspace, map_obj, layer_id)
+            except Exception:
+                pass
+        if added_ids:
+            map_document.persist_map(map_obj, workspace)
+        raise
 
     bounds = detected["bounds"]
     if prepared and prepared.get("bounds"):
@@ -234,6 +237,8 @@ def import_files(
 
     return {
         "layers": layers,
+        "added": len(added_ids),
+        "reused": len(layers) - len(added_ids),
         "photos": detected["photos"],
         "rasters": len(rasters),
         "bounds": bounds,
@@ -249,19 +254,23 @@ def _orthorectify_status(files: list[dict[str, Any]]) -> dict[str, Any]:
         for item in files
         if item["kind"] == "raster" and item.get("role") == "dem"
     ]
+    dem = _pick_dem(photos, dems)
+    shown = dem or (dems[0] if dems else None)
     status: dict[str, Any] = {
         "available": False,
         "photos": len(photos),
         "photo_paths": [],
-        "dem": dems[0]["path"] if dems else None,
+        "dem": shown["path"] if shown else None,
         "reason": "",
     }
     if not photos:
         status["reason"] = "no geotagged photos to orthorectify"
-    elif not dems:
-        status["reason"] = "no DEM/DSM in the selection"
     elif not ortho_service.available():
         status["reason"] = ortho_service.install_hint()
+    elif not dems:
+        status["reason"] = "no DEM/DSM in the selection"
+    elif dem is None:
+        status["reason"] = "the DEM does not overlap the photo locations"
     elif len(photos) > ortho_service.MAX_PHOTOS:
         status["reason"] = (
             f"{len(photos)} photos is over the {ortho_service.MAX_PHOTOS}-photo "
@@ -273,19 +282,67 @@ def _orthorectify_status(files: list[dict[str, Any]]) -> dict[str, Any]:
     return status
 
 
-def _candidate_paths(workspace: Workspace, paths: Iterable[str]) -> list[Path]:
-    """Resolve the selection to unique supported files, walking directories."""
+def _pick_dem(
+    photos: list[dict[str, Any]], dems: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Choose the DEM that contains (or overlaps most of) the photo points."""
+    if not dems:
+        return None
+    photo_box = _union_bounds(photos)
+    if photo_box is None:
+        return dems[0]
+    for dem in dems:
+        if _contains(dem.get("bounds"), photo_box):
+            return dem
+    overlapping = [dem for dem in dems if _overlap_area(dem.get("bounds"), photo_box)]
+    if not overlapping:
+        return None
+    return max(overlapping, key=lambda dem: _overlap_area(dem.get("bounds"), photo_box))
+
+
+def _contains(outer: list[float] | None, inner: list[float] | None) -> bool:
+    if not outer or not inner:
+        return False
+    return (
+        outer[0] <= inner[0]
+        and outer[1] <= inner[1]
+        and outer[2] >= inner[2]
+        and outer[3] >= inner[3]
+    )
+
+
+def _overlap_area(a: list[float] | None, b: list[float] | None) -> float:
+    if not a or not b:
+        return 0.0
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    return width * height if width > 0 and height > 0 else 0.0
+
+
+def _candidate_paths(
+    workspace: Workspace, paths: Iterable[str]
+) -> tuple[list[Path], bool]:
+    """Resolve the selection to unique supported files, walking directories.
+
+    Returns the files and whether :data:`MAX_SCAN_FILES` cut the walk short.
+    """
     selected: list[Path] = []
     seen: set[Path] = set()
+    truncated = False
+    scanned = 0
     for raw in paths:
         if not isinstance(raw, str) or not raw.strip():
             continue
         path = workspace.resolve(raw.strip(), must_exist=True)
         if path.is_dir():
-            targets = sorted(item for item in path.rglob("*") if item.is_file())
+            targets = (item for item in path.rglob("*") if item.is_file())
         else:
-            targets = [path]
+            targets = iter([path])
         for target in targets:
+            scanned += 1
+            if scanned > MAX_SCAN_FILES:
+                truncated = True
+                break
             suffix = target.suffix.lower()
             if suffix not in PHOTO_SUFFIXES and suffix not in RASTER_SUFFIXES:
                 continue
@@ -294,11 +351,18 @@ def _candidate_paths(workspace: Workspace, paths: Iterable[str]) -> list[Path]:
                 continue
             seen.add(resolved)
             selected.append(target)
+        if truncated:
+            break
     if not selected:
+        if truncated:
+            raise ToolInputError(
+                f"scanned {MAX_SCAN_FILES} files without finding supported drone "
+                "imagery; select a narrower folder"
+            )
         raise ToolInputError(
             "no supported drone files in the selection (need GeoTIFF/COG or geotagged JPEG/TIFF)"
         )
-    return selected
+    return selected, truncated
 
 
 def _classify(source: Path) -> dict[str, Any] | None:
@@ -378,26 +442,26 @@ def _photo_record(source: Path) -> dict[str, Any] | None:
 
     if gps:
         latitude, longitude = gps["latitude"], gps["longitude"]
-        altitude = gps.get("altitude")
-        direction = gps.get("direction")
-        timestamp = _text(exif.get(EXIF_DATETIME)) or xmp.get("timestamp") or ""
     else:
-        latitude = _number(xmp.get("latitude"))
-        longitude = _number(xmp.get("longitude"))
-        if latitude is not None and str(xmp.get("latitude_ref", "")).upper().startswith("S"):
-            latitude = -latitude
-        if longitude is not None and str(xmp.get("longitude_ref", "")).upper().startswith("W"):
-            longitude = -longitude
-        altitude = _number(xmp.get("altitude"))
-        if altitude is None:
-            altitude = _number(xmp.get("relative_altitude"))
-        direction = _number(xmp.get("direction"))
-        timestamp = xmp.get("timestamp", "")
-
+        latitude = _xmp_coord(xmp.get("latitude"), xmp.get("latitude_ref"))
+        longitude = _xmp_coord(xmp.get("longitude"), xmp.get("longitude_ref"))
     if latitude is None or longitude is None:
         return None
     if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
         return None
+
+    altitude = (gps or {}).get("altitude")
+    altitude_kind = "gps" if altitude is not None else None
+    if altitude is None:
+        altitude = _number(xmp.get("altitude"))
+        altitude_kind = "absolute" if altitude is not None else None
+    if altitude is None:
+        altitude = _number(xmp.get("relative_altitude"))
+        altitude_kind = "relative" if altitude is not None else None
+    direction = (gps or {}).get("direction")
+    if direction is None:
+        direction = _number(xmp.get("direction"))
+    timestamp = _exif_datetime_original(exif) or xmp.get("timestamp", "")
 
     make = _text(exif.get(EXIF_MAKE)) or xmp.get("make", "")
     model = _text(exif.get(EXIF_MODEL)) or xmp.get("model", "")
@@ -407,7 +471,8 @@ def _photo_record(source: Path) -> dict[str, Any] | None:
     detail = f"{kind_label} · {camera or 'unknown camera'}"
     detail += f" · {latitude:.6f}, {longitude:.6f}"
     if altitude is not None:
-        detail += f" · {altitude:.1f} m"
+        suffix = " relative" if altitude_kind == "relative" else ""
+        detail += f" · {altitude:.1f} m{suffix}"
 
     record: dict[str, Any] = {
         "kind": "photo",
@@ -422,6 +487,7 @@ def _photo_record(source: Path) -> dict[str, Any] | None:
     }
     if altitude is not None:
         record["altitude"] = altitude
+        record["altitude_kind"] = altitude_kind or "gps"
     if direction is not None:
         record["direction"] = direction
     return record
@@ -448,7 +514,7 @@ def _exif_gps(exif: Any) -> dict[str, float] | None:
     altitude = _number(gps.get(GPS_ALTITUDE))
     if altitude is not None:
         # GPSAltitudeRef is 0 above sea level and 1 below it.
-        if _text(gps.get(GPS_ALTITUDE_REF)).strip("\x00") == "\x01":
+        if _text(gps.get(GPS_ALTITUDE_REF)).strip("\x00") in ("\x01", "1"):
             altitude = -altitude
         result["altitude"] = altitude
     direction = _number(gps.get(GPS_DIRECTION))
@@ -457,11 +523,23 @@ def _exif_gps(exif: Any) -> dict[str, float] | None:
     return result
 
 
+def _exif_datetime_original(exif: Any) -> str:
+    """Read DateTimeOriginal from the top level or the Exif sub-IFD."""
+    value = _text(exif.get(EXIF_DATETIME))
+    if value:
+        return value
+    try:
+        sub = exif.get_ifd(EXIF_IFD) or {}
+    except Exception:
+        return ""
+    return _text(sub.get(EXIF_DATETIME))
+
+
 def _xmp_text(exif: Any, image: Any) -> str:
     """Return the XMP packet from a TIFF tag or a JPEG APP1 segment."""
     raw = exif.get(XMP_TAG)
     if not raw:
-        raw = image.info.get("xmp")
+        raw = image.info.get("xmp") or image.info.get("XML:com.adobe.xmp")
     if not raw:
         return ""
     if isinstance(raw, bytes):
@@ -470,15 +548,14 @@ def _xmp_text(exif: Any, image: Any) -> str:
 
 
 def _xmp_fields(packet: str) -> dict[str, str]:
-    """Read the XMP attributes this module cares about, by local name.
+    """Read the XMP fields this module uses, matched by local name.
 
-    DJI writes its capture metadata as attributes on ``rdf:Description`` (e.g.
-    ``drone-dji:GpsLatitude``). Parsing attributes by local name keeps the
-    reader independent of each vendor's namespace prefix. A malformed packet is
-    ignored rather than failing the whole import.
+    Vendor prefixes (``drone-dji:``, ``exif:``, ``tiff:``) do not matter, and a
+    malformed packet is ignored instead of failing the import.
     """
     if not packet:
         return {}
+    packet = packet[:MAX_XMP_BYTES]
     start = packet.find("<x:xmpmeta")
     end = packet.find("</x:xmpmeta>")
     if start >= 0 and end > start:
@@ -515,7 +592,6 @@ def _xmp_fields(packet: str) -> dict[str, str]:
 
 
 def _looks_like_drone(camera: str, xmp_text: str) -> bool:
-    """Whether the metadata marks the capture as drone imagery."""
     lowered = camera.lower()
     if any(make in lowered for make in DRONE_MAKES):
         return True
@@ -524,7 +600,6 @@ def _looks_like_drone(camera: str, xmp_text: str) -> bool:
 
 
 def _photo_geojson(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build one point FeatureCollection from the detected photo records."""
     features = []
     for record in records:
         properties = {
@@ -537,6 +612,8 @@ def _photo_geojson(records: list[dict[str, Any]]) -> dict[str, Any]:
             value = record.get(key)
             if value is not None:
                 properties[key] = round(float(value), 3)
+        if record.get("altitude_kind"):
+            properties["altitude_kind"] = record["altitude_kind"]
         features.append(
             {
                 "type": "Feature",
@@ -554,9 +631,9 @@ def _write_photo_geojson(
     workspace: Workspace, parent: str, collection: dict[str, Any]
 ) -> str:
     """Write the point layer under ``results/`` and return its relative path."""
-    folder = PurePosixPath(parent).name or "drone"
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", folder).strip("-") or "drone"
-    target = workspace.resolve(f"results/drone/{slug}-photos.geojson", write=True)
+    target = workspace.resolve(
+        f"results/drone/{_slug(parent)}-photos.geojson", write=True
+    )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         json.dumps(collection, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -564,6 +641,43 @@ def _write_photo_geojson(
     relative = workspace.relative(target)
     workspace.record_output(relative)
     return relative
+
+
+def _slug(value: str) -> str:
+    """A filesystem-safe name for a parent path (so same-named folders differ)."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-") or "drone"
+
+
+def _layer_for_source(map_obj: Any, relative: str) -> dict[str, Any] | None:
+    for layer in layerops.layers(map_obj):
+        metadata = layer.get("metadata") or {}
+        if metadata.get(layerops.LOCAL_SOURCE_KEY) == relative:
+            return layer
+    return None
+
+
+def _layer_summary(layer: dict[str, Any], kind: str, path: str) -> dict[str, Any]:
+    return {
+        "id": str(layer.get("id")),
+        "name": layer.get("name"),
+        "kind": kind,
+        "path": path,
+        "reused": True,
+    }
+
+
+def _unique_name(map_obj: Any, base: str, source: str) -> str:
+    taken = {
+        str(layer.get("name"))
+        for layer in layerops.layers(map_obj)
+        if (layer.get("metadata") or {}).get(layerops.LOCAL_SOURCE_KEY) != source
+    }
+    if base not in taken:
+        return base
+    index = 2
+    while f"{base} ({index})" in taken:
+        index += 1
+    return f"{base} ({index})"
 
 
 def _raster_layer_name(record: dict[str, Any]) -> str:
@@ -577,18 +691,20 @@ def _photo_layer_name(parent: str) -> str:
 
 
 def _rgb_bands(source: Path) -> list[int] | None:
-    """Select the first three bands of an RGB(A) raster for display.
+    """Select the first three bands of a colour raster for display.
 
-    A three-band ortho left at ``bands=None`` is rendered by GeoLibre as a
-    single-band grayscale image, so the explicit RGB selection is what keeps
-    imagery in colour. A fourth band is treated as alpha.
+    A three-band ortho left at ``bands=None`` renders as grayscale, so the
+    explicit selection keeps imagery in colour. A fourth band is ignored,
+    which drops an alpha channel.
     """
     try:
         with rasterio.open(source) as dataset:
             if dataset.count < 3:
                 return None
+            if dataset.count <= 4:
+                return [1, 2, 3]
             color = [item.name for item in dataset.colorinterp[:3]]
-            if color == ["red", "green", "blue"] or dataset.count in (3, 4):
+            if color == ["red", "green", "blue"]:
                 return [1, 2, 3]
     except Exception:
         pass
@@ -623,6 +739,44 @@ def _dms(value: Any) -> float | None:
     return parts[0] + parts[1] / 60.0 + seconds / 3600.0
 
 
+def _xmp_coord(value: Any, ref: Any) -> float | None:
+    """Parse an XMP coordinate.
+
+    Handles decimal (DJI), ``24,40.8167N``, and degrees/minutes/seconds forms;
+    a hemisphere in the value or in ``GPSLatitudeRef``/``GPSLongitudeRef`` sets
+    the sign.
+    """
+    raw = _text(value)
+    if not raw:
+        return None
+    hemisphere = ""
+    match = re.search(r"([NSEW])\s*$", raw, re.IGNORECASE)
+    if match:
+        hemisphere = match.group(1).upper()
+        raw = raw[: match.start()]
+    else:
+        match = re.match(r"\s*([NSEW])", raw, re.IGNORECASE)
+        if match:
+            hemisphere = match.group(1).upper()
+            raw = raw[match.end() :]
+    numbers = [float(part) for part in _NUMBER.findall(raw)]
+    if not numbers:
+        return None
+    if len(numbers) == 1:
+        result = numbers[0]
+    else:
+        sign = -1.0 if numbers[0] < 0 else 1.0
+        minutes = numbers[1] if len(numbers) > 1 else 0.0
+        seconds = numbers[2] if len(numbers) > 2 else 0.0
+        result = sign * (abs(numbers[0]) + minutes / 60.0 + seconds / 3600.0)
+    ref_text = _text(ref).upper()
+    if hemisphere in ("S", "W") or ref_text.startswith(("S", "W")):
+        return -abs(result)
+    if hemisphere in ("N", "E") or ref_text.startswith(("N", "E")):
+        return abs(result)
+    return result
+
+
 def _number(value: Any) -> float | None:
     """Parse a number from an EXIF rational, int/float, or metadata string."""
     if value is None:
@@ -655,7 +809,6 @@ def _text(value: Any) -> str:
 
 
 def _unescape(value: str) -> str:
-    """Decode the five XML entities XMP attribute values may contain."""
     return (
         value.replace("&amp;", "&")
         .replace("&lt;", "<")

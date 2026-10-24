@@ -47,6 +47,7 @@ class AppState:
         probe_vision: bool = False,
     ) -> None:
         self.lock = threading.RLock()
+        self._drone_cancels: dict[str, threading.Event] = {}
         self.settings = settings or prefs.load_settings()
         self.bus = EventBus()
         self.jobs = JobRegistry(self.bus)
@@ -65,8 +66,7 @@ class AppState:
             jobs=self.jobs,
             settings=lambda: self.settings,
             files_provider=lambda: self.list_files(),
-            map_provider=lambda: self.workspaces.project(),
-            map_revision=lambda: self.workspaces.map_revision,
+            map_state=self.workspaces.map_state,
             bump_map=self.workspaces.bump_map_revision,
             trace_length=self._trace_length,
             vision=self.vision,
@@ -84,16 +84,16 @@ class AppState:
     def snapshot(self) -> dict:
         """Everything the browser needs to render the app from scratch."""
         with self.lock:
-            workspace = self.workspaces.workspace
+            map_state = self.workspaces.map_state()
             return {
-                # Use the directory's actual name, not the name as typed on
-                # open. On a case-insensitive filesystem the two can differ,
-                # and the capture bridge compares this value verbatim.
-                "active_workspace": workspace.root.name if workspace is not None else None,
+                # The directory name, not the name as typed on open: the two
+                # differ on case-insensitive filesystems and the capture bridge
+                # compares this value verbatim.
+                "active_workspace": map_state["workspace"],
                 "workspaces": list_workspaces(),
                 "cells": self.notebook.cells(),
-                "map_project": self.workspaces.project(),
-                "map_revision": self.workspaces.map_revision,
+                "map_project": map_state["project"],
+                "map_revision": map_state["revision"],
                 "map_app_url": self.workspaces.map._app_url,
                 "files": self.list_files(),
                 "jobs": self.jobs.snapshot(),
@@ -190,20 +190,34 @@ class AppState:
 
     # -- workspace lifecycle ---------------------------------------------
 
+    def _leave_workspace(self, reason: str) -> None:
+        """Drop everything owned by the workspace being left.
+
+        The live map, notebook, and services are per workspace; a pending
+        capture/query, a throttled map notification, or a running drone import
+        must not leak into the next one.
+        """
+        reset_bridge()
+        self.capture.cancel_all(reason)
+        self.map_bridge.cancel_all(reason)
+        for stop in self._drone_cancels.values():
+            stop.set()
+        self._drone_cancels.clear()
+        self.services.map_notifier.reset()
+        self.jobs.clear()
+        self.services.unbind()
+
     def open_workspace(self, name: str) -> dict:
         """Open a workspace, binding a fresh runtime and agent to it."""
         self.runs.wait_idle()
-        # The map iframe is replaced when the workspace name changes, so the
-        # recorded handshake belongs to an iframe that is gone until the new one
-        # posts its own. Re-opening the workspace that is already open leaves the
-        # iframe in place, and clearing the record there would report the live
-        # app as disconnected for the rest of the session.
-        if name != self.workspaces.name:
-            reset_bridge()
-            self.capture.cancel_all("the workspace changed during the capture")
-            self.map_bridge.cancel_all("the workspace changed during the query")
         with self.lock:
+            previous = self.workspaces.name
+            # Open first: a missing/unreadable workspace must not tear down the
+            # one that is currently open. Re-opening the same workspace leaves
+            # the iframe in place, so it skips the teardown.
             workspace = self.workspaces.open(name)
+            if name != previous:
+                self._leave_workspace("the workspace changed")
             self.notebook.load(workspace)
             self.jobs.clear()
             runtime = self.services.bind(workspace, self.workspaces.map)
@@ -228,7 +242,13 @@ class AppState:
             # interest) without touching the workspace that does not exist yet.
             workflows.prompt_text(spec, params or {}, verdict=self._model_verdict)
         with self.lock:
+            previous = self.workspaces.name
+            # `new` refuses an existing name before touching anything, then
+            # opens the new directory. Clean up the old state after that switch
+            # so a failed creation leaves the current workspace intact.
             self.workspaces.new(name)
+            if previous is not None and previous != name:
+                self._leave_workspace("the workspace changed")
         try:
             self.open_workspace(name)
             if spec is not None:
@@ -272,14 +292,10 @@ class AppState:
     def close_workspace(self) -> dict:
         """Close the open workspace and reset the map and notebook."""
         self.runs.wait_idle()
-        reset_bridge()
-        self.capture.cancel_all("the workspace was closed")
-        self.map_bridge.cancel_all("the workspace was closed")
         with self.lock:
+            self._leave_workspace("the workspace was closed")
             self.workspaces.close()
             self.notebook.close()
-            self.jobs.clear()
-            self.services.unbind()
             return self.snapshot()
 
     def save_workspace(self) -> dict:
@@ -298,16 +314,18 @@ class AppState:
     ) -> dict:
         """Adopt a project pushed by the browser.
 
-        The browser echoes its project on every map change, including changes
-        the server just made. Without a revision, a late echo can replace a
-        newer server project and drop the layer that was just added. A push is
-        accepted only when it is based on the current revision; a stale push
-        gets the authoritative project back so the tab can catch up.
+        A push is accepted only when it is based on the current revision; a
+        stale push gets the authoritative project back so the tab can catch up.
         """
         with self.lock, MAP_LOCK:
             active = self.workspaces.workspace
             if active is None:
-                raise ValueError("no workspace open")
+                return {
+                    "ok": True,
+                    "accepted": False,
+                    "no_workspace": True,
+                    "workspace": None,
+                }
             active_name = active.root.name
             if workspace is not None and workspace != active_name:
                 return {
@@ -321,6 +339,7 @@ class AppState:
                 return {
                     "ok": True,
                     "accepted": False,
+                    "workspace": active_name,
                     "revision": current,
                     "project": self.workspaces.project(),
                 }
@@ -328,23 +347,25 @@ class AppState:
                 # An echo of the project the browser already has: nothing to
                 # adopt, but still make sure the workspace snapshot exists.
                 self.workspaces.save_map()
-                return {"ok": True, "accepted": True, "revision": current}
+                return {
+                    "ok": True,
+                    "accepted": True,
+                    "workspace": active_name,
+                    "revision": current,
+                }
             self.workspaces.set_map_project(project)
             event = self._map_event()
             self.bus.publish("map", event)
             return {
                 "ok": True,
                 "accepted": True,
+                "workspace": active_name,
                 "revision": event["revision"],
             }
 
     def _map_event(self) -> dict:
-        """Return the SSE map payload for the current project."""
-        with MAP_LOCK:
-            return {
-                "project": self.workspaces.project(),
-                "revision": self.workspaces.map_revision,
-            }
+        """Return the SSE map payload for the current workspace."""
+        return self.workspaces.map_state()
 
     # -- cells -----------------------------------------------------------
 
@@ -470,54 +491,110 @@ class AppState:
             return {"path": relative}
 
     def detect_drone_files(self, paths: list[str]) -> dict:
-        """List drone photos and georeferenced rasters in a selection.
-
-        This is the read-only half of the import prompt: it inspects headers
-        only, so the browser can show what was detected before anything is
-        converted or added to the live map.
-        """
+        """List drone photos and georeferenced rasters in a selection."""
         with self.lock:
             workspace = self._require_workspace()
-            from ..geo import drone
+        from ..geo import drone
 
-            return drone.detect_files(workspace, paths)
+        return drone.detect_files(workspace, paths)
 
     def import_drone_files(self, paths: list[str], orthorectify: bool = False) -> dict:
         """Add detected drone files to the live GeoLibre map.
 
-        Orthorectification runs before the session/map locks: it can take
-        seconds to minutes, and holding the locks would stall state polling and
-        every other request for the whole run.
+        Detection, COG conversion, and orthorectification run outside the
+        session/map locks so a long run does not stall state polling; only the
+        final layer insertion is serialized. A workspace switch during the run
+        aborts instead of adding layers to the wrong map.
         """
+        from ..geo import drone
+        from ..geo import orthorectify as ortho_service
+        from ..geo import raster as raster_ops
+
         with self.lock:
             workspace = self._require_workspace()
+            if self.services.runtime is None:
+                raise ToolInputError("no workspace open")
+
+        detected = drone.detect_files(workspace, paths)
+        prepared = None
+        stop: threading.Event | None = None
+        if orthorectify:
+            status = detected["orthorectify"]
+            if not status.get("available"):
+                raise ToolInputError(
+                    status.get("reason") or "this selection cannot be orthorectified"
+                )
+            job = self.jobs.reporter().job(
+                "drone.orthorectify",
+                f"Orthorectify {status['photos']} photo(s)",
+                unit="frames",
+                total=status["photos"] or None,
+            )
+            stop = threading.Event()
+            with self.lock:
+                self._drone_cancels[job.id] = stop
+            try:
+                prepared = ortho_service.prepare_orthomosaic(
+                    workspace,
+                    paths,
+                    detected=detected,
+                    progress=lambda index, total, detail: job.progress(
+                        index, total=total, detail=detail
+                    ),
+                    cancelled=stop.is_set,
+                )
+            except Exception as exc:
+                if stop.is_set():
+                    job.cancel(detail="cancelled by user")
+                    raise ToolInputError("orthorectification cancelled") from None
+                job.fail(exc)
+                raise
+            else:
+                job.done(artifact=prepared["path"])
+            finally:
+                with self.lock:
+                    self._drone_cancels.pop(job.id, None)
+
+        # Conversion is slow and writes only to results/; keep it out of the
+        # lock so the map and /api/state stay responsive.
+        for record in detected["files"]:
+            if record["kind"] == "raster":
+                raster_ops.to_cog_if_needed(workspace, record["path"])
+
+        with self.lock:
+            if self.workspaces.workspace is not workspace:
+                raise ToolInputError(
+                    "the workspace changed while the import was running; nothing was added"
+                )
+            if stop is not None and stop.is_set():
+                raise ToolInputError("orthorectification cancelled")
             runtime = self.services.runtime
             if runtime is None:
                 raise ToolInputError("no workspace open")
+            with MAP_LOCK:
+                result = drone.import_files(
+                    workspace,
+                    self.workspaces.map,
+                    runtime.file_url,
+                    paths,
+                    orthorectify=orthorectify,
+                    prepared=prepared,
+                    detected=detected,
+                )
+                if result["layers"]:
+                    self.workspaces.bump_map_revision()
+                    self.bus.publish("map", self._map_event())
+                    self.bus.publish("files", {"files": self.list_files()})
+                return result
 
-        prepared = None
-        if orthorectify:
-            from ..geo import orthorectify as ortho_service
-
-            prepared = ortho_service.prepare_orthomosaic(workspace, paths)
-
-        with self.lock, MAP_LOCK:
-            from ..geo import drone
-
-            result = drone.import_files(
-                workspace,
-                self.workspaces.map,
-                runtime.file_url,
-                paths,
-                orthorectify=orthorectify,
-                prepared=prepared,
-            )
-            if result["layers"]:
-                self.workspaces.save_map()
-                self.workspaces.bump_map_revision()
-                self.bus.publish("map", self._map_event())
-                self.bus.publish("files", {"files": self.list_files()})
-            return result
+    def cancel_drone_import(self, job_id: str) -> dict:
+        """Ask a running orthorectification job to stop between frames."""
+        with self.lock:
+            stop = self._drone_cancels.get(job_id)
+            if stop is None:
+                raise KeyError(f"no running drone import with id {job_id!r}")
+            stop.set()
+        return {"cancelled": True}
 
     def delete_file(self, path: str) -> dict:
         """Delete a user file and drop any map layer that served it."""

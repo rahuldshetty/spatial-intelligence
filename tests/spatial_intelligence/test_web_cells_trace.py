@@ -495,6 +495,15 @@ export function notify() {
   for (const listener of listeners) listener(state);
 }
 
+export function applySnapshot(snapshot) {
+  const snap = snapshot || {};
+  if (snap.active_workspace !== undefined) state.active_workspace = snap.active_workspace;
+  if (snap.cells) state.cells = snap.cells;
+  if (snap.jobs) state.jobs = snap.jobs;
+  notify();
+  return state;
+}
+
 export function setState(patch) {
   Object.assign(state, patch);
   notify();
@@ -520,8 +529,16 @@ export function normalizeCells(cells) {
     : [];
 }
 
+const HIDDEN_JOB_KINDS = new Set(["drone.orthorectify"]);
+
+export function isHiddenJob(job) {
+  return Boolean(job && HIDDEN_JOB_KINDS.has(job.kind));
+}
+
 export function jobsFor(cellId) {
-  return (state.jobs || []).filter((job) => job.parent_id === cellId);
+  return (state.jobs || []).filter(
+    (job) => job.parent_id === cellId && !isHiddenJob(job)
+  );
 }
 
 /** Mirrors the real store's step identity (see web/js/store.js). */
@@ -1216,6 +1233,12 @@ const scenarios = {
       makeJob({ job_id: "j1", parent_id: "p1", label: "tiles.zip" }),
       makeJob({ job_id: "j2", parent_id: "t1", status: "done", completed: 1, total: 1, unit: "steps" }),
       makeJob({ job_id: "j3", parent_id: "gone", label: "orphan.csv" }),
+      makeJob({
+        job_id: "j4",
+        kind: "drone.orthorectify",
+        parent_id: "gone",
+        label: "orthomosaic",
+      }),
     ];
     const tab = dump(cellsPage.renderCellsTab());
 
@@ -1750,18 +1773,23 @@ class CellTests(ScenarioCase):
 class CellsPageTests(ScenarioCase):
     SCENARIO = "cells_page"
 
-    def test_cells_and_orphan_jobs_are_listed_separately(self):
+    def test_orphan_jobs_are_listed_before_cells(self):
         cells = self.result["tab"]["children"]
         self.assertEqual(
             [child["attrs"].get("data-cell-id") for child in cells if "cell" in child["class"].split()],
-            ["p1", "t1", None],
+            [None, "p1", "t1"],
         )
-        orphan = cells[-1]
+        orphan = cells[0]
         self.assertIn("download-cell", orphan["class"])
         self.assertNotIn("data-cell-id", orphan["attrs"])
         self.assertEqual(orphan["attrs"]["data-job-id"], "j3")
         python = next(child for child in cells if child["attrs"].get("data-cell-id") == "p1")
         self.assertEqual(self.one(python, cls="download-trace")["attrs"]["data-job-id"], "j1")
+
+    def test_orthorectify_job_cards_are_hidden(self):
+        self.assertEqual(
+            find_all(self.result["tab"], attr="data-job-id", value="j4"), []
+        )
 
     def test_render_cells_only_repaints_the_tab(self):
         self.assertEqual(self.result["repainted"], 3)

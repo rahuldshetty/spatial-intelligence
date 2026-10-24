@@ -4,7 +4,7 @@ import { el, toast } from "../dom.js";
 import { addCell as createCell, deleteCell as deleteCellRequest, updateCell } from "../api.js";
 import { icon } from "../icons.js";
 import { hold, isFollowing, scrollTo } from "../scroll.js";
-import { jobsFor, normalizeCells, setState, state } from "../store.js";
+import { isHiddenJob, jobsFor, normalizeCells, setState, state } from "../store.js";
 import { renderCell } from "../components/cell.js";
 import { renderJob } from "../components/progress.js";
 
@@ -48,7 +48,8 @@ export function renderCellsTab() {
     return wrap;
   }
 
-  if (!state.cells.length && !(state.jobs || []).length) {
+  const visibleJobs = (state.jobs || []).filter((job) => !isHiddenJob(job));
+  if (!state.cells.length && !visibleJobs.length) {
     wrap.append(
       emptyState(
         "sparkles",
@@ -59,14 +60,18 @@ export function renderCellsTab() {
     return wrap;
   }
 
+  // Standalone jobs are actions started outside a cell (imports, drone
+  // orthorectification). They happened before the notebook timeline, so they
+  // render above the cells instead of after them.
   const attached = new Set();
   for (const cell of state.cells) {
-    const jobs = jobsFor(cell.id);
-    wrap.append(renderCell(cell, jobs));
-    for (const job of jobs) attached.add(job.job_id);
+    for (const job of jobsFor(cell.id)) attached.add(job.job_id);
   }
-  for (const job of state.jobs || []) {
+  for (const job of visibleJobs) {
     if (!attached.has(job.job_id)) wrap.append(renderJob(job));
+  }
+  for (const cell of state.cells) {
+    wrap.append(renderCell(cell, jobsFor(cell.id)));
   }
   return wrap;
 }

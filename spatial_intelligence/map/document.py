@@ -14,6 +14,7 @@ from geolibre import Map
 from geolibre.project import build_empty_project
 
 from ..workspace import Workspace
+from . import locked
 
 #: File name of the workspace snapshot the live map is persisted to.
 SNAPSHOT_NAME = "current.geolibre.json"
@@ -43,6 +44,7 @@ def create_map(workspace: Workspace, *, height: str = "100%", theme: str = "ligh
     return m
 
 
+@locked
 def persist_map(map_obj: Map, workspace: Workspace) -> None:
     """Save the current project to the workspace snapshot and bump it."""
     map_obj.save_project(str(snapshot_path(workspace)))

@@ -536,6 +536,107 @@ await scenario("store", async () => {
   eq("store.snapshot_jobs", store.state.jobs.length, 1);
   eq("store.snapshot_theme_attr", document.documentElement.getAttribute("data-theme"), "dark");
   eq("store.snapshot_keeps_tab", store.state.selected_tab, "Cells");
+
+  store.setState({ map_revision: 5, map_project: { layers: [{ id: "new" }] } });
+  store.applySnapshot({ map_revision: 4, map_project: { layers: [] } });
+  eq("store.stale_snapshot_keeps_project", store.state.map_project, { layers: [{ id: "new" }] });
+  eq("store.stale_snapshot_keeps_revision", store.state.map_revision, 5);
+  store.applySnapshot({ map_revision: 6, map_project: { layers: [] } });
+  eq("store.new_snapshot_replaces_project", store.state.map_project, { layers: [] });
+  eq("store.new_snapshot_advances_revision", store.state.map_revision, 6);
+
+  store.setState({
+    active_workspace: "A",
+    map_revision: 7,
+    map_project: { layers: [{ id: "a" }] },
+  });
+  store.applySnapshot({
+    active_workspace: "B",
+    map_revision: 0,
+    map_project: { layers: [] },
+  });
+  eq("store.workspace_switch_takes_new_project", store.state.map_project, { layers: [] });
+  eq("store.workspace_switch_resets_revision", store.state.map_revision, 0);
+
+  store.setState({
+    jobs: [
+      {
+        job_id: "ortho",
+        parent_id: "c1",
+        kind: "drone.orthorectify",
+        status: "done",
+      },
+    ],
+  });
+  eq("store.hides_ortho_job_from_cells", store.jobsFor("c1"), []);
+  eq("store.keeps_ortho_job_for_tracing", store.state.jobs.length, 1);
+});
+
+await scenario("cells", async () => {
+  const store = await import(webUrl("store.js"));
+  const cells = await import(webUrl("components/cell.js"));
+
+  store.setState({
+    active_workspace: "ws",
+    cells: [
+      { id: "a", kind: "prompt", source: "", status: "idle" },
+      { id: "b", kind: "prompt", source: "", status: "idle" },
+    ],
+  });
+  const node = cells.renderCell(store.state.cells[0], []);
+  const buttons = node.querySelectorAll("button");
+  const up = buttons.find((button) => button.getAttribute("aria-label") === "Move up");
+  const down = buttons.find((button) => button.getAttribute("aria-label") === "Move down");
+  check("cells.move_up_disabled_at_top", Boolean(up) && up.disabled === true);
+  check("cells.move_down_enabled", Boolean(down) && down.disabled === false);
+
+  fetchCalls.length = 0;
+  fetchResponder = () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({
+      active_workspace: "ws",
+      cells: [
+        { id: "b", kind: "prompt", source: "", status: "idle" },
+        { id: "a", kind: "prompt", source: "", status: "idle" },
+      ],
+    }),
+  });
+  down.click();
+  await tick();
+  await tick();
+  eq(
+    "cells.move_request",
+    fetchCalls.map((call) => [call.method, call.url, call.body]),
+    [["POST", "/api/cells/a/move", JSON.stringify({ index: 1 })]]
+  );
+  eq("cells.move_applies_snapshot", store.state.cells.map((cell) => cell.id), ["b", "a"]);
+
+  const page = await import(webUrl("pages/cells.js"));
+  store.setState({
+    active_workspace: "ws",
+    cells: [{ id: "a", kind: "prompt", source: "", status: "idle" }],
+    jobs: [
+      { job_id: "job-1", kind: "download", status: "done", label: "Import" },
+      {
+        job_id: "job-2",
+        kind: "drone.orthorectify",
+        status: "done",
+        label: "Ortho",
+      },
+    ],
+  });
+  const tab = page.renderCellsTab();
+  eq("cells.job_renders_first", tab.children[0].getAttribute("data-job-id"), "job-1");
+  eq("cells.cell_renders_after_job", tab.children[1].getAttribute("data-cell-id"), "a");
+  eq(
+    "cells.ortho_job_hidden",
+    tab
+      .querySelectorAll(".cell")
+      .filter((node) => node.getAttribute("data-job-id") === "job-2").length,
+    0
+  );
 });
 
 await scenario("api", async () => {
@@ -880,6 +981,36 @@ await scenario("map_capture", async () => {
     fetchCalls.filter((call) => call.url.startsWith("/api/map/bridge")).length,
     0
   );
+
+  store.state.map_project = { layers: [{ id: "keep" }] };
+  store.state.map_revision = 3;
+  source.emit(
+    "map",
+    JSON.stringify({
+      workspace: "ws2",
+      revision: 99,
+      project: { layers: [{ id: "old" }] },
+    })
+  );
+  await tick();
+  eq("map.ignores_other_workspace_map", store.state.map_project, {
+    layers: [{ id: "keep" }],
+  });
+  eq("map.ignores_other_workspace_revision", store.state.map_revision, 3);
+
+  source.emit(
+    "map",
+    JSON.stringify({
+      workspace: "ws1",
+      revision: 4,
+      project: { layers: [{ id: "server" }] },
+    })
+  );
+  await tick();
+  eq("map.accepts_own_workspace_map", store.state.map_project, {
+    layers: [{ id: "server" }],
+  });
+  eq("map.accepts_own_workspace_revision", store.state.map_revision, 4);
 });
 
 await scenario("map", async () => {
@@ -984,6 +1115,49 @@ await scenario("map", async () => {
   sendMessage(ORIGIN, replacement.contentWindow, { type: "geolibre:error", message: "boom" });
   const errorNode = document.getElementById("map-error");
   eq("map.error_surface", [errorNode.style.display, errorNode.textContent], ["block", "Map error: boom"]);
+
+  // A push started in one workspace must not land after a switch.
+  sendMessage(ORIGIN, replacement.contentWindow, { type: "geolibre:ready", version: "1.2" });
+  await tick();
+  store.state.map_revision = 1;
+  let releasePush;
+  fetchResponder = () =>
+    new Promise((resolve) => {
+      releasePush = () =>
+        resolve({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            accepted: false,
+            workspace: "ws2",
+            revision: 9,
+            project: { layers: [{ id: "old" }] },
+          }),
+        });
+    });
+  fetchCalls.length = 0;
+  sendMessage(ORIGIN, replacement.contentWindow, {
+    type: "geolibre:state",
+    seq: 1,
+    project: { layers: [{ id: "from-iframe" }] },
+  });
+  await tick();
+  check(
+    "map.push_started",
+    fetchCalls.filter((call) => call.url === "/api/map/project").length === 1,
+    JSON.stringify(fetchCalls)
+  );
+  store.state.active_workspace = "ws3";
+  store.state.map_revision = 0;
+  store.state.map_project = { layers: [{ id: "ws3" }] };
+  releasePush();
+  await tick();
+  await tick();
+  eq("map.ignores_push_response_from_old_workspace", store.state.map_project, {
+    layers: [{ id: "ws3" }],
+  });
+  eq("map.keeps_new_workspace_revision", store.state.map_revision, 0);
 });
 
 await scenario("scroll", async () => {
@@ -1123,6 +1297,9 @@ class FrontendCoreTests(unittest.TestCase):
 
     def test_map_bridge(self) -> None:
         self.assert_group("map.")
+
+    def test_cells(self) -> None:
+        self.assert_group("cells.")
 
     def test_run_shortcut(self) -> None:
         self.assert_group("shortcut.")

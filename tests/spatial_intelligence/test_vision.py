@@ -288,7 +288,11 @@ class VisionGatingTests(unittest.TestCase):
                 jobs=jobs,
                 settings=lambda: {"model": "openai:gpt-4o"},
                 files_provider=lambda: [],
-                map_provider=lambda: {},
+                map_state=lambda: {
+                    "workspace": None,
+                    "project": {},
+                    "revision": 0,
+                },
                 vision=vision,
                 capture=CaptureBroker(bus),
             )
@@ -349,10 +353,13 @@ class VisionToolTests(unittest.TestCase):
             },
         )
 
-    def test_map_source_returns_the_vision_answer(self):
+    def test_map_source_returns_the_vision_answer_and_capture_context(self):
         runtime = self.runtime()
         result = VisionPack(runtime).analyze_image("what is shown?")
-        self.assertEqual(result, "a red square")
+        self.assertTrue(result.startswith("a red square"))
+        self.assertIn("bbox", result)
+        self.assertIn("zoom", result)
+        self.assertIn("canvas", result)
         vision = runtime.services[VISION_SERVICE]
         self.assertEqual(vision.calls[0][0], "what is shown?")
         self.assertEqual(vision.calls[0][2], "image/jpeg")
@@ -365,7 +372,9 @@ class VisionToolTests(unittest.TestCase):
         result = VisionPack(runtime).analyze_image(
             "describe it", source="data/shot.png", max_side=300
         )
-        self.assertEqual(result, "a red square")
+        self.assertTrue(result.startswith("a red square"))
+        self.assertIn("data/shot.png", result)
+        self.assertIn("1200x600", result)
         data = runtime.services[VISION_SERVICE].calls[0][1]
         with Image.open(io.BytesIO(data)) as image:
             self.assertLessEqual(max(image.size), 300)
@@ -397,7 +406,8 @@ class VisionToolTests(unittest.TestCase):
                 "describe it", source="data/false_color.tif", bands=[4, 2, 3]
             )
 
-        self.assertEqual(result, "a red square")
+        self.assertTrue(result.startswith("a red square"))
+        self.assertIn("bands [4, 2, 3]", result)
         self.assertEqual(loader.call_args.args[2], [4, 2, 3])
 
     def test_tool_and_python_facade_share_the_vision_answer(self):
@@ -411,7 +421,8 @@ class VisionToolTests(unittest.TestCase):
         facade = PythonPack(runtime).executor.namespace()["vision"]
         python_answer = facade.ask("describe it", image="data/shot.png")
 
-        self.assertEqual(tool_answer, "a red square")
+        self.assertTrue(tool_answer.startswith("a red square"))
+        self.assertIn("data/shot.png", tool_answer)
         self.assertEqual(python_answer, "a red square")
         self.assertEqual(
             [call[0] for call in runtime.services[VISION_SERVICE].calls],

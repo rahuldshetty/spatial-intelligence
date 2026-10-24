@@ -181,6 +181,10 @@ export function importDroneFiles(paths, orthorectify = false) {
   return request("POST", "/api/drone/import", { paths, orthorectify });
 }
 
+export function cancelDroneImport(jobId) {
+  return request("POST", "/api/drone/cancel", { job_id: jobId });
+}
+
 export function deleteWorkspaceFile(path) {
   return request("POST", "/api/files/delete", { path });
 }

@@ -178,7 +178,6 @@ function closeTreeMenu() {
   }
 }
 
-/** Show the file tree's right-click menu for one file or folder. */
 function openTreeMenu(path, event, isDir) {
   closeTreeMenu();
   const menu = el("div", { class: "tree-menu", role: "menu" });

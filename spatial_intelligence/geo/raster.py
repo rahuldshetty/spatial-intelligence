@@ -43,9 +43,7 @@ MAX_CONTOUR_LEVELS = 200
 #: fetches whole tiles over range requests, so a striped file (one row per block)
 #: would make it read the entire image for the first screenful.
 COG_MIN_BLOCK = 256
-#: A tiled raster larger than this needs overviews to be COG-shaped. Without
-#: them every zoomed-out screenful reads full-resolution tiles, which is the
-#: same failure a striped file causes for the first screenful.
+#: Above this size a tiled raster also needs overviews to be COG-shaped.
 COG_MAX_SIZE_WITHOUT_OVERVIEWS = 1024
 
 #: Options that are ``gdal_translate`` *API* arguments rather than creation options.
@@ -191,15 +189,11 @@ def raster_stats(workspace: Workspace, path: str, band: int = 1) -> dict:
 def looks_cog(path: Path) -> bool | None:
     """Whether a raster is laid out the way a COG reader needs it.
 
-    The check is structural — tiled, with blocks big enough to be worth a range
-    request — because that is what the map's COG client depends on, and because it
-    is the property the failed conversion was about: a striped GeoTIFF pulls the
-    whole image for the first screenful. A tiled file without overviews has the
-    same problem when the view is zoomed out: every screenful still reads the
-    full-resolution tiles, so a large tiled GeoTIFF is not COG-shaped either.
-    ``rio-cogeo``'s validator is deliberately not used here: it calls a 64x64
-    striped file a valid COG, so it cannot be the gate (it remains available to
-    generated code, and as a second opinion when a file is checked by hand).
+    The check is structural: tiled, with blocks large enough for a range
+    request, and overviews once the raster is larger than one screenful. A
+    striped file pulls the whole image for the first screenful; a large tiled
+    file without overviews does the same when zoomed out. ``rio-cogeo``'s
+    validator is not the gate: it calls a 64x64 striped file a valid COG.
 
     Returns ``None`` when the file cannot be read as a raster at all — the one
     case where a caller should keep its own behavior rather than convert.

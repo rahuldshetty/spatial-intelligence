@@ -221,6 +221,11 @@ class WorkspaceRouteTests(ServerTestCase):
 
         self.assertEqual(response.status_code, 409)
 
+    def test_a_map_project_push_without_a_workspace_is_a_conflict(self):
+        response = self.client.post("/api/map/project", json={"project": {}})
+
+        self.assertEqual(response.status_code, 409)
+
     def test_a_pushed_map_project_is_persisted(self):
         self.open_workspace()
         project = self.client.get("/api/state").json()["map_project"]
@@ -264,6 +269,7 @@ class WorkspaceRouteTests(ServerTestCase):
         self.assertEqual(stale.status_code, 200)
         stale_body = stale.json()
         self.assertFalse(stale_body["accepted"])
+        self.assertEqual(stale_body["workspace"], state["active_workspace"])
         self.assertEqual(stale_body["revision"], body["revision"])
         self.assertEqual(
             stale_body["project"]["mapView"]["zoom"],
@@ -448,6 +454,9 @@ class EventStreamTests(ServerTestCase):
             map_events[-1]["data"]["revision"], state.workspaces.map_revision
         )
         self.assertIn("project", map_events[-1]["data"])
+        self.assertEqual(
+            map_events[-1]["data"]["workspace"], snapshot["active_workspace"]
+        )
 
     # The SSE frames themselves are verified against a live uvicorn server: the
     # in-process test client buffers a whole response body, so it cannot read an

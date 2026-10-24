@@ -28,9 +28,8 @@ class WorkspaceSession:
         self._root_for = root_for
         self.name: str | None = None
         self.workspace: Workspace | None = None
-        #: Monotonic revision of the live map project. Every authoritative
-        #: mutation (a tool, a file re-point, a browser edit) bumps it, so a
-        #: project pushed from a stale tab can be recognized and ignored.
+        #: Monotonic revision of the live map project; stale browser pushes
+        #: carry an older value and are rejected by the session.
         self.map_revision = 0
         self.map = Map(
             center=EMPTY_VIEW["center"],
@@ -47,9 +46,9 @@ class WorkspaceSession:
         workspace = Workspace(self._root_for(name)).create()
         self.name = name
         self.workspace = workspace
-        self.map_revision = 0
         snapshot = document.snapshot_path(workspace)
         with MAP_LOCK:
+            self.map_revision = 0
             if snapshot.exists():
                 self.map.load_project(snapshot)
             else:
@@ -77,8 +76,8 @@ class WorkspaceSession:
         """Forget the open workspace and reset the map to an empty project."""
         self.name = None
         self.workspace = None
-        self.map_revision = 0
         with MAP_LOCK:
+            self.map_revision = 0
             self.map.load_project(
                 geolibre_project.build_empty_project(
                     center=EMPTY_VIEW["center"], zoom=EMPTY_VIEW["zoom"]
@@ -89,8 +88,9 @@ class WorkspaceSession:
 
     def bump_map_revision(self) -> int:
         """Mark the live project as changed and return the new revision."""
-        self.map_revision += 1
-        return self.map_revision
+        with MAP_LOCK:
+            self.map_revision += 1
+            return self.map_revision
 
     def save_map(self) -> None:
         """Persist the live map into the workspace snapshot."""
@@ -103,13 +103,28 @@ class WorkspaceSession:
             raise ValueError("no workspace open")
         with MAP_LOCK:
             self.map.load_project(project)
-            self.map.save_project(str(document.snapshot_path(self.workspace)))
-            self.workspace.bump()
+            document.persist_map(self.map, self.workspace)
             self.bump_map_revision()
 
     def project(self) -> dict:
         """The live project, as sent to the browser."""
-        return self.map.to_project()
+        with MAP_LOCK:
+            return self.map.to_project()
+
+    def map_state(self) -> dict:
+        """Return the workspace, project, and revision captured atomically.
+
+        Revision numbers are scoped to one workspace: the same number in two
+        workspaces means nothing, so every map event carries the workspace it
+        belongs to.
+        """
+        with MAP_LOCK:
+            workspace = self.workspace
+            return {
+                "workspace": workspace.root.name if workspace is not None else None,
+                "project": self.map.to_project(),
+                "revision": self.map_revision,
+            }
 
     # -- files -----------------------------------------------------------
 

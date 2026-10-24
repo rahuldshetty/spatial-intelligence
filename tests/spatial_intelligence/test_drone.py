@@ -13,8 +13,11 @@ import json
 import os
 import shutil
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy
 import rasterio
@@ -142,6 +145,69 @@ class DroneDetectionTests(unittest.TestCase):
         with self.assertRaises(ToolInputError):
             drone.detect_files(self.workspace, ["data/notes.txt"])
 
+    def test_standard_xmp_dms_coordinates_keep_minutes_and_hemisphere(self):
+        folder = self.workspace.data / "standard-xmp"
+        folder.mkdir()
+        xmp = (
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+            '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description '
+            'xmlns:exif="http://ns.adobe.com/exif/1.0/" '
+            'exif:GPSLatitude="24,40.8167S" '
+            'exif:GPSLongitude="120,57.1021W"/>'
+            "</rdf:RDF></x:xmpmeta>"
+        )
+        for name in ("south.tif", "north.tif"):
+            Image.new("RGB", (6, 6)).save(
+                folder / name, tiffinfo={700: xmp.encode("utf-8")}
+            )
+
+        result = drone.detect_files(self.workspace, ["data/standard-xmp"])
+        photo = next(item for item in result["files"] if item["path"].endswith("south.tif"))
+        self.assertAlmostEqual(photo["lat"], -24.680278, places=5)
+        self.assertAlmostEqual(photo["lon"], -120.951702, places=5)
+
+    def test_xmp_fills_altitude_and_direction_when_exif_has_only_gps(self):
+        path = self.workspace.data / "merged.jpg"
+        exif = Image.Exif()
+        exif[271] = "DJI"
+        exif[272] = "FC6310R"
+        exif[34853] = {
+            1: "N",
+            2: (24, 40, 49.0),
+            3: "E",
+            4: (120, 57, 6.0),
+        }
+        exif[700] = (
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+            '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description '
+            'xmlns:drone-dji="http://www.dji.com/drone-dji/1.0/" '
+            'drone-dji:AbsoluteAltitude="+186.57" '
+            'drone-dji:GimbalYawDegree="+92.9"/>'
+            "</rdf:RDF></x:xmpmeta>"
+        ).encode("utf-8")
+        Image.new("RGB", (8, 8)).save(path, exif=exif)
+
+        record = drone._photo_record(path)
+        self.assertAlmostEqual(record["altitude"], 186.57, places=2)
+        self.assertEqual(record["altitude_kind"], "absolute")
+        self.assertAlmostEqual(record["direction"], 92.9, places=2)
+
+    def test_a_dem_that_does_not_overlap_the_photos_disables_orthorectification(self):
+        flight = self.workspace.data / "overlap"
+        flight.mkdir()
+        _jpeg(flight / "IMG_0001.JPG")
+        _raster(self.workspace.data / "far_dem.tif")
+
+        result = drone.detect_files(
+            self.workspace, ["data/overlap", "data/far_dem.tif"]
+        )
+        status = result["orthorectify"]
+        self.assertEqual(status["dem"], "data/far_dem.tif")
+        self.assertFalse(status["available"])
+        self.assertIn("does not overlap", status["reason"])
+
 
 class DroneImportTests(unittest.TestCase):
     def setUp(self):
@@ -177,9 +243,74 @@ class DroneImportTests(unittest.TestCase):
         photo_layer = next(layer for layer in layers if layer["type"] == "geojson")
         self.assertEqual(photo_layer["name"], "flight photos")
         self.assertEqual(len(photo_layer["geojson"]["features"]), 2)
-        self.assertTrue(
-            (self.workspace.results / "drone" / "flight-photos.geojson").is_file()
+        self.assertEqual(
+            photo_layer["metadata"]["geoaiSourcePath"],
+            "results/drone/data-flight-photos.geojson",
         )
+        self.assertTrue(
+            (self.workspace.results / "drone" / "data-flight-photos.geojson").is_file()
+        )
+
+    def test_reimport_reuses_layers_instead_of_duplicating_them(self):
+        def run():
+            return drone.import_files(
+                self.workspace,
+                self.map,
+                lambda rel: f"http://127.0.0.1:9999/api/files/{rel}",
+                ["data"],
+            )
+
+        first = run()
+        second = run()
+
+        self.assertEqual(first["added"], 2)
+        self.assertEqual(second["added"], 0)
+        self.assertEqual(second["reused"], 2)
+        self.assertEqual(len(self.map.to_project()["layers"]), 2)
+
+    def test_same_named_folders_get_distinct_outputs_and_layer_names(self):
+        other = self.workspace.data / "other" / "flight"
+        other.mkdir(parents=True)
+        _jpeg(other / "IMG_9999.JPG")
+
+        drone.import_files(
+            self.workspace,
+            self.map,
+            lambda rel: f"http://127.0.0.1:9999/api/files/{rel}",
+            ["data"],
+        )
+
+        names = sorted(
+            layer["name"]
+            for layer in self.map.to_project()["layers"]
+            if layer["type"] == "geojson"
+        )
+        self.assertEqual(names, ["flight photos", "flight photos (2)"])
+        self.assertTrue(
+            (self.workspace.results / "drone" / "data-flight-photos.geojson").is_file()
+        )
+        self.assertTrue(
+            (
+                self.workspace.results
+                / "drone"
+                / "data-other-flight-photos.geojson"
+            ).is_file()
+        )
+
+    def test_a_failed_import_rolls_back_the_layers_it_added(self):
+        with patch(
+            "spatial_intelligence.map.layers.add_geojson",
+            side_effect=ToolInputError("boom"),
+        ):
+            with self.assertRaises(ToolInputError):
+                drone.import_files(
+                    self.workspace,
+                    self.map,
+                    lambda rel: f"http://127.0.0.1:9999/api/files/{rel}",
+                    ["data"],
+                )
+
+        self.assertEqual(self.map.to_project()["layers"], [])
 
     def test_import_is_persisted_to_the_workspace_snapshot(self):
         drone.import_files(
@@ -308,6 +439,99 @@ class DroneRouteTests(unittest.TestCase):
         snapshot = self.client.get("/api/state").json()
         names = {layer["name"] for layer in snapshot["map_project"]["layers"]}
         self.assertIn("orthomosaic", names)
+
+    def test_cancelling_an_unknown_import_is_not_found(self):
+        response = self.client.post("/api/drone/cancel", json={"job_id": "missing"})
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_import_aborts_when_the_workspace_changes_during_orthorectification(self):
+        self.client.post("/api/workspace/new", json={"name": "guard"})
+        state = deps.app_state()
+        workspace = state.workspaces.workspace
+        flight = workspace.data / "flight"
+        flight.mkdir(parents=True)
+        _jpeg(flight / "IMG_0001.JPG")
+        with rasterio.open(
+            workspace.data / "dem.tif",
+            "w",
+            driver="GTiff",
+            width=8,
+            height=6,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=from_origin(120.9, 24.7, 0.01, 0.01),
+        ) as dataset:
+            dataset.write(numpy.ones((1, 6, 8), dtype="uint8"))
+
+        def switch_workspace(*args, **kwargs):
+            state.workspaces.new("guard-other")
+            return {"path": "results/drone/guard/orthomosaic.tif", "bounds": None}
+
+        with patch(
+            "spatial_intelligence.geo.orthorectify.prepare_orthomosaic",
+            side_effect=switch_workspace,
+        ):
+            with self.assertRaises(ToolInputError) as caught:
+                state.import_drone_files(["data"], True)
+
+        self.assertIn("workspace changed", str(caught.exception))
+        self.assertEqual(state.workspaces.project()["layers"], [])
+
+    def test_a_running_orthorectification_can_be_cancelled(self):
+        self.client.post("/api/workspace/new", json={"name": "cancel"})
+        state = deps.app_state()
+        workspace = state.workspaces.workspace
+        flight = workspace.data / "flight"
+        flight.mkdir(parents=True)
+        _jpeg(flight / "IMG_0001.JPG")
+        with rasterio.open(
+            workspace.data / "dem.tif",
+            "w",
+            driver="GTiff",
+            width=8,
+            height=6,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=from_origin(120.9, 24.7, 0.01, 0.01),
+        ) as dataset:
+            dataset.write(numpy.ones((1, 6, 8), dtype="uint8"))
+
+        started = threading.Event()
+        outcome: dict[str, Exception] = {}
+
+        def fake_prepare(workspace, paths, *, detected=None, progress=None, cancelled=None):
+            started.set()
+            while not cancelled():
+                time.sleep(0.01)
+            raise ToolInputError("orthorectification cancelled")
+
+        def run():
+            try:
+                state.import_drone_files(["data"], True)
+            except Exception as exc:  # noqa: BLE001 - asserted below
+                outcome["error"] = exc
+
+        with patch(
+            "spatial_intelligence.geo.orthorectify.prepare_orthomosaic",
+            side_effect=fake_prepare,
+        ):
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            self.assertTrue(started.wait(5))
+            job = next(
+                item
+                for item in state.jobs.snapshot()
+                if item["kind"] == "drone.orthorectify"
+            )
+            state.cancel_drone_import(job["job_id"])
+            worker.join(timeout=5)
+
+        self.assertIsInstance(outcome.get("error"), ToolInputError)
+        self.assertIn("cancelled", str(outcome["error"]))
+        self.assertEqual(state.jobs.snapshot()[0]["status"], "cancelled")
 
 
 if __name__ == "__main__":

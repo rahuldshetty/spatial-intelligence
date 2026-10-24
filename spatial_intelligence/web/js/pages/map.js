@@ -108,6 +108,9 @@ function attachBridge() {
     const origin = mapOrigin();
     if (!origin || event.origin !== origin) return;
     if (!iframe || event.source !== iframe.contentWindow) return;
+    // A message from the iframe of the workspace we just left must not touch
+    // the new workspace's map while syncMap is replacing it.
+    if (iframeWorkspace !== state.active_workspace) return;
     const data = event.data;
     if (!data || typeof data !== "object") return;
 
@@ -128,9 +131,16 @@ function attachBridge() {
       // snaps the map to its previous view.
       if (data.project) {
         state.map_project = data.project;
-        setMapProject(data.project, state.map_revision, state.active_workspace)
+        const requestedWorkspace = iframeWorkspace;
+        setMapProject(data.project, state.map_revision, requestedWorkspace)
           .then((result) => {
             if (!result || result.workspace_mismatch) return;
+            // The tab may have switched workspaces while this push was in
+            // flight; its answer belongs to the previous map.
+            if (requestedWorkspace !== state.active_workspace) return;
+            if (result.workspace != null && result.workspace !== state.active_workspace) {
+              return;
+            }
             if (result.revision != null) state.map_revision = result.revision;
             if (result.accepted === false && result.project) {
               // Another tab or a tool changed the map first. Adopt the

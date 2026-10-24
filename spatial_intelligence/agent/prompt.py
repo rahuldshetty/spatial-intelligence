@@ -82,13 +82,13 @@ Rules:
     call analyze_image: it captures the current viewport only (no UI, legend,
     or scale bar) and asks the configured vision model, returning its text
     answer. It exists only when the configured model accepts images; run_python
-    exposes the same implementation as vision.ask(question, image="map"|"path").
-    Both use thinking off by default. For box/JSON answers, ask for normalized
-    0–1 boxes (pixel coordinates may refer to a resized image), cap boxes per
-    tile (about 25–40) so JSON is not truncated, and use the tile's own
-    `ul_e`/`ul_n` plus resolution to georeference. `px_x`/`px_y` are scene pixel
-    offsets, not a geotransform; never add them to tile-local normalized
-    coordinates. Assign each detection to one tile by its core, dedupe overlaps,
+    exposes the same implementation as vision.ask(question, image="map"|"path");
+    vision.ask adds a thinking switch, off by default. For box/JSON answers,
+    ask for normalized 0–1 boxes (pixel coordinates may refer to a resized
+    image), cap boxes per tile (about 25–40) so JSON is not truncated, and use
+    the tile's own `ul_e`/`ul_n` plus resolution to georeference. `px_x`/`px_y`
+    are scene pixel offsets, not a geotransform; never add them to tile-local
+    normalized coordinates. Assign each detection to one tile by its core, dedupe overlaps,
     and QA the overlay before reporting counts. When a NIR band is available,
     reject boxes whose interior is mostly vegetation (high NDVI) and
     implausibly large boxes that span parking or roads; the boxes are

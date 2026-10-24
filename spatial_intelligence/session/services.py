@@ -67,6 +67,11 @@ class MapNotifier:
             self._pending = False
             self._emit()
 
+    def reset(self) -> None:
+        """Drop a notification queued for the workspace being left."""
+        self._pending = False
+        self._last = 0.0
+
 
 class SessionServices:
     """Builds and owns the runtime, registry, and agent for one open session."""
@@ -78,8 +83,7 @@ class SessionServices:
         jobs: JobRegistry,
         settings: Callable[[], dict],
         files_provider: Callable[[], list[str]],
-        map_provider: Callable[[], dict],
-        map_revision: Callable[[], int] | None = None,
+        map_state: Callable[[], dict],
         bump_map: Callable[[], int] | None = None,
         trace_length: Callable[[str], int] | None = None,
         base_url: str | None = None,
@@ -91,8 +95,7 @@ class SessionServices:
         self._jobs = jobs
         self._settings = settings
         self._files_provider = files_provider
-        self._map_provider = map_provider
-        self._map_revision = map_revision or (lambda: 0)
+        self._map_state = map_state
         self._bump_map = bump_map or (lambda: 0)
         self._trace_length = trace_length
         self._base_url = base_url or server_base_url()
@@ -139,6 +142,10 @@ class SessionServices:
 
     def bind(self, workspace: Workspace, map_obj: Any) -> ToolRuntime:
         """Create the runtime, register every pack against it, and build the agent."""
+        if self._runtime is not None:
+            # A workspace switch rebinds; drop the old models, registry, and
+            # agent first so nothing from the previous workspace survives.
+            self.unbind()
         runtime = ToolRuntime(
             workspace=workspace,
             map=map_obj,
@@ -292,7 +299,4 @@ class SessionServices:
         self.map_notifier.notify()
 
     def _publish_map(self) -> None:
-        self._bus.publish(
-            "map",
-            {"project": self._map_provider(), "revision": self._map_revision()},
-        )
+        self._bus.publish("map", self._map_state())

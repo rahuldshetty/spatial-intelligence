@@ -57,13 +57,40 @@ export function applySnapshot(snapshot) {
   const snap = snapshot || {};
   const incoming = Array.isArray(snap.cells) ? snap.cells : [];
   const live = new Map((state.cells || []).map((cell) => [cell.id, cell]));
+  // Revisions are scoped to one workspace. A switch resets the server's
+  // counter to 0, so the old workspace's revision must not make the new
+  // project look stale. Within one workspace, never let a late snapshot put an
+  // older project back under a revision the tab already knows.
+  const hasWorkspace = Object.prototype.hasOwnProperty.call(snap, "active_workspace");
+  const activeWorkspace = hasWorkspace
+    ? snap.active_workspace != null
+      ? snap.active_workspace
+      : null
+    : state.active_workspace;
+  const workspaceChanged = hasWorkspace && activeWorkspace !== state.active_workspace;
+  const revision = snap.map_revision != null ? Number(snap.map_revision) : null;
+  const current = Number(state.map_revision) || 0;
+  const staleMap = !workspaceChanged && revision != null && revision < current;
   return setState({
-    active_workspace: snap.active_workspace != null ? snap.active_workspace : null,
+    active_workspace: activeWorkspace,
     workspaces: snap.workspaces || [],
     cells: incoming.map((cell) => keepStreamedSteps(cell, live.get(cell.id))),
-    map_project: snap.map_project != null ? snap.map_project : null,
-    map_revision:
-      snap.map_revision != null ? snap.map_revision : state.map_revision,
+    map_project: workspaceChanged
+      ? snap.map_project != null
+        ? snap.map_project
+        : null
+      : staleMap
+        ? state.map_project
+        : snap.map_project != null
+          ? snap.map_project
+          : null,
+    map_revision: workspaceChanged
+      ? revision != null
+        ? revision
+        : 0
+      : revision != null
+        ? Math.max(current, revision)
+        : state.map_revision,
     map_app_url: snap.map_app_url != null ? snap.map_app_url : null,
     files: snap.files || [],
     jobs: snap.jobs || [],
@@ -142,8 +169,18 @@ export function setFiles(files) {
   return state.files;
 }
 
+/* Drone orthorectification still records progress for tracing, but its job
+   card is intentionally hidden in the notebook for now. */
+const HIDDEN_JOB_KINDS = new Set(["drone.orthorectify"]);
+
+export function isHiddenJob(job) {
+  return Boolean(job && HIDDEN_JOB_KINDS.has(job.kind));
+}
+
 export function jobsFor(cellId) {
-  return (state.jobs || []).filter((job) => job && job.parent_id === cellId);
+  return (state.jobs || []).filter(
+    (job) => job && job.parent_id === cellId && !isHiddenJob(job)
+  );
 }
 
 export function upsertJob(job) {

@@ -34,22 +34,13 @@ class VisionPack:
         is not true-colour, e.g. ``bands=[4, 3, 2]``. A one-band raster is
         rendered as grayscale.
 
-        ``question`` is sent to the vision model with the image, and the model's
-        text answer is returned. No image is attached to this conversation, so
-        this is the right tool for counts, yes/no QA, descriptions, and
-        normalized boxes. ``run_python`` exposes the same implementation as
-        ``vision.ask(...)`` for loops and JSON parsing; it accepts ``thinking``
-        and ``max_tokens`` overrides. Thinking is off by default so a reasoning
-        model cannot spend its whole output budget and return no answer.
-
-        For dense tiled detection, ask for normalized 0–1 boxes (pixel
-        coordinates may refer to a resized image), cap boxes per tile (about
-        25–40) so JSON is not truncated, and georeference with the tile's own
-        ``ul_e``/``ul_n`` plus resolution. ``px_x``/``px_y`` are scene pixel
-        offsets, not a geotransform; never add them to tile-local normalized
-        coordinates.
+        The model's text answer is returned with the capture's bbox/zoom (or
+        the image's path and scale), so normalized boxes can be georeferenced.
+        No image part is added to this conversation. ``run_python`` exposes the
+        same implementation as ``vision.ask(...)`` and adds ``thinking`` and
+        ``max_tokens`` overrides.
         """
-        return analyze_image_source(
+        answer = analyze_image_source(
             question,
             source=source,
             workspace=self._rt.workspace,
@@ -57,6 +48,7 @@ class VisionPack:
             max_side=max_side,
             bands=bands,
         )
+        return f"{answer.text}\n\n{answer.context}" if answer.context else answer.text
 
 
 __all__ = ["VisionPack"]

@@ -45,8 +45,9 @@ dependencies = [
   "onnxruntime>=1.20",
   # Drone orthorectification. A main dependency because the importer presents
   # "Build an orthomosaic" as a built-in action, not an optional feature. It is
-  # AGPL-3.0-or-later and pulls OpenCV; the service imports it only when the
-  # user actually runs orthorectification.
+  # AGPL-3.0-or-later and pulls the GUI OpenCV wheel; the AppImage build swaps
+  # that for opencv-python-headless (see packaging/Dockerfile.build). The
+  # service imports orthority only when the user runs orthorectification.
   "orthority>=0.7,<0.8",
 ]
 

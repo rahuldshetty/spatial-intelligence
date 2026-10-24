@@ -1,8 +1,8 @@
-"""Drone imagery detection and import-to-map routes.
+"""Drone imagery detection, import, and cancellation routes.
 
-The browser calls these two routes at two points: after a local/URL import, and
-from the file tree's context menu. Detection is read-only; the import route is
-what writes the photo GeoJSON and adds layers to the live map.
+Detection is read-only; the import route writes the photo GeoJSON and adds
+layers to the live map. Upload, URL import, the workflow wizard, and the file
+tree all offer the same flow.
 """
 
 from __future__ import annotations
@@ -27,6 +27,12 @@ class DroneImport(DronePaths):
     orthorectify: bool = False
 
 
+class DroneCancel(BaseModel):
+    """The orthorectification job to stop."""
+
+    job_id: str = Field(min_length=1)
+
+
 @router.post("/api/drone/detect")
 def api_detect_drone(body: DronePaths) -> dict:
     """List the drone photos and georeferenced rasters in a selection."""
@@ -41,3 +47,9 @@ def api_import_drone(body: DroneImport) -> dict:
     if app_state().workspaces.workspace is None:
         raise HTTPException(status_code=409, detail="no workspace open")
     return app_state().import_drone_files(body.paths, body.orthorectify)
+
+
+@router.post("/api/drone/cancel")
+def api_cancel_drone(body: DroneCancel) -> dict:
+    """Ask a running orthorectification job to stop between frames."""
+    return app_state().cancel_drone_import(body.job_id)

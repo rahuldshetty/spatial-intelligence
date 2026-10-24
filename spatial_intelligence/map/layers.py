@@ -24,7 +24,7 @@ from geolibre import authoring as geolibre_authoring
 from ..contracts.errors import ToolInputError
 from ..workspace import Workspace, WorkspaceError
 from ..geo import raster
-from . import styles
+from . import locked, styles
 from .document import persist_map
 
 #: Layer metadata key holding the workspace-relative path of a local source.
@@ -81,6 +81,7 @@ def find_layer(map_obj: Map, layer_id: str) -> dict[str, Any] | None:
     return None
 
 
+@locked
 def set_layer_metadata(map_obj: Map, layer_id: str, key: str, value: Any) -> None:
     """Set ``metadata[key]`` on a layer; a no-op when the layer is gone."""
     layer = find_layer(map_obj, layer_id)
@@ -185,6 +186,7 @@ def _local_rel_for_layer(layer: dict, workspace: Workspace) -> str | None:
     return None
 
 
+@locked
 def repoint_local_rasters(
     map_obj: Map, workspace: Workspace, file_url: Callable[[str], str]
 ) -> int:
@@ -213,6 +215,7 @@ def repoint_local_rasters(
     return count
 
 
+@locked
 def rename_local_sources(
     map_obj: Map,
     workspace: Workspace,
@@ -235,6 +238,7 @@ def rename_local_sources(
     return count
 
 
+@locked
 def remove_local_sources(map_obj: Map, workspace: Workspace, rel: str) -> list[str]:
     """Remove layers that served ``rel`` after the file was deleted."""
     removed: list[str] = []
@@ -274,6 +278,7 @@ def clean_layer_name(name: str) -> str:
     return clean
 
 
+@locked
 def add_geojson(
     workspace: Workspace,
     map_obj: Map,
@@ -281,13 +286,13 @@ def add_geojson(
     name: str,
     *,
     style: dict[str, Any] | None = None,
+    source: str | None = None,
 ) -> str:
     """Add a GeoJSON layer and return its id.
 
     ``data`` may be a workspace-relative path, an http(s) URL, or a literal
-    GeoJSON string; ``name`` is the layer's display name (unique names are what
-    later by-name references resolve against). ``style`` is applied through the
-    same path as :func:`style_layer` (see there for the accepted keys).
+    GeoJSON string; ``name`` is the layer's display name. ``source`` records the
+    workspace-relative file the layer was built from so a re-import can find it.
     """
     name = clean_layer_name(name)
     if not _is_url(data) and not _is_geojson_literal(data):
@@ -295,10 +300,13 @@ def add_geojson(
     layer_id = map_obj.add_geojson(data, name)
     if style:
         styles.apply_style(map_obj.project, layer_id, style)
+    if source is not None:
+        _tag_local_source(map_obj, layer_id, source)
     persist_map(map_obj, workspace)
     return layer_id
 
 
+@locked
 def add_vector(
     workspace: Workspace,
     map_obj: Map,
@@ -326,6 +334,7 @@ def add_vector(
     return layer_id
 
 
+@locked
 def add_raster(
     workspace: Workspace,
     map_obj: Map,
@@ -405,6 +414,7 @@ def _complete_raster_state(
     state.setdefault("maxZoom", 24)
 
 
+@locked
 def add_tile_layer(
     workspace: Workspace, map_obj: Map, url: str, name: str, attribution: str | None = None
 ) -> str:
@@ -414,6 +424,7 @@ def add_tile_layer(
     return layer_id
 
 
+@locked
 def add_wms(
     workspace: Workspace,
     map_obj: Map,
@@ -441,6 +452,7 @@ def add_wms(
     return layer_id
 
 
+@locked
 def set_view(
     workspace: Workspace,
     map_obj: Map,
@@ -456,6 +468,7 @@ def set_view(
     return {"status": "applied", "mapView": deepcopy(map_obj.project.get("mapView"))}
 
 
+@locked
 def set_basemap(workspace: Workspace, map_obj: Map, basemap: str) -> dict:
     """Set the background basemap (name or MapLibre style URL)."""
     map_obj.set_basemap(basemap)
@@ -490,6 +503,7 @@ RASTER_BASEMAPS: dict[str, dict[str, str]] = {
 }
 
 
+@locked
 def add_basemap(
     workspace: Workspace,
     map_obj: Map,
@@ -570,6 +584,7 @@ def _layer_ids(map_obj: Map, refs: list[str]) -> list[str]:
     return resolved
 
 
+@locked
 def swipe_compare(
     workspace: Workspace,
     map_obj: Map,
@@ -606,6 +621,8 @@ def swipe_compare(
     persist_map(map_obj, workspace)
     return {"status": "applied", "swipe": state}
 
+
+@locked
 def style_layer(
     workspace: Workspace, map_obj: Map, layer: str, style: dict[str, Any]
 ) -> dict:
@@ -639,6 +656,7 @@ def style_layer(
     }
 
 
+@locked
 def classify_layer(
     workspace: Workspace,
     map_obj: Map,
@@ -679,6 +697,7 @@ def classify_layer(
     }
 
 
+@locked
 def set_layer_visibility(
     workspace: Workspace, map_obj: Map, layer: str, visible: bool
 ) -> dict:
@@ -688,6 +707,7 @@ def set_layer_visibility(
     return {"status": "applied", "layer": layer, "visible": visible}
 
 
+@locked
 def set_layer_opacity(
     workspace: Workspace, map_obj: Map, layer: str, opacity: float
 ) -> dict:
@@ -697,6 +717,7 @@ def set_layer_opacity(
     return {"status": "applied", "layer": layer, "opacity": opacity}
 
 
+@locked
 def remove_layer(workspace: Workspace, map_obj: Map, layer: str) -> dict:
     """Remove a layer by id or display name."""
     map_obj.remove_layer(layer)
@@ -704,6 +725,7 @@ def remove_layer(workspace: Workspace, map_obj: Map, layer: str) -> dict:
     return {"status": "applied", "removed": layer}
 
 
+@locked
 def clear_layers(workspace: Workspace, map_obj: Map) -> dict:
     """Remove all layers from the map."""
     map_obj.clear_layers()
@@ -711,6 +733,7 @@ def clear_layers(workspace: Workspace, map_obj: Map) -> dict:
     return {"status": "applied", "layerCount": 0}
 
 
+@locked
 def add_legend(
     workspace: Workspace,
     map_obj: Map,
@@ -724,6 +747,7 @@ def add_legend(
     return {"status": "applied", "title": title, "items": items, "shape": shape}
 
 
+@locked
 def add_colorbar(
     workspace: Workspace,
     map_obj: Map,
@@ -745,6 +769,7 @@ def add_colorbar(
     }
 
 
+@locked
 def fit_bounds(workspace: Workspace, map_obj: Map, bounds: list[float]) -> dict:
     """Fit the map camera and return confirmation of the resulting view."""
     map_obj.fit_project_bounds(bounds)
@@ -755,6 +780,7 @@ def fit_bounds(workspace: Workspace, map_obj: Map, bounds: list[float]) -> dict:
     }
 
 
+@locked
 def save_map(workspace: Workspace, map_obj: Map, path: str) -> Path:
     """Save the current project under ``maps/``; returns the written path."""
     out = workspace.resolve_under(workspace.maps, path)
@@ -762,6 +788,7 @@ def save_map(workspace: Workspace, map_obj: Map, path: str) -> Path:
     return out
 
 
+@locked
 def export_html(
     workspace: Workspace, map_obj: Map, path: str, title: str = "GeoLibre Map"
 ) -> Path:

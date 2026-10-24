@@ -252,8 +252,17 @@ function handleJobs(payload) {
 
 function handleMap(payload) {
   if (!payload) return;
+  if (payload.workspace != null && payload.workspace !== state.active_workspace) {
+    return;
+  }
+  if (payload.revision != null) {
+    const revision = Number(payload.revision);
+    if (Number.isFinite(revision) && revision < (Number(state.map_revision) || 0)) {
+      return;
+    }
+    state.map_revision = revision;
+  }
   state.map_project = payload.project != null ? payload.project : null;
-  if (payload.revision != null) state.map_revision = payload.revision;
   syncMap();
 }
 

@@ -103,11 +103,8 @@ class _ConfinedWorkspace:
 class _VisionFacade:
     """Ask the configured vision model about the map or a workspace image.
 
-    This and the ``analyze_image`` tool call the same implementation
-    (:func:`analyze_image_source`) and return its text answer. A snippet can
-    loop over tiles and parse JSON boxes without adding images to the main
-    conversation. Only workspace paths and the live map are accepted; there is
-    no arbitrary URL or raw bytes entry point.
+    ``analyze_image`` and this facade share
+    :func:`analyze_image_source`; the facade returns the answer text only.
     """
 
     def __init__(self, workspace: Workspace, services: dict) -> None:
@@ -135,7 +132,7 @@ class _VisionFacade:
         is DeepSeek's reasoning switch; it defaults off so JSON/box answers are
         not lost to reasoning, and is ignored by other providers.
         """
-        return analyze_image_source(
+        answer = analyze_image_source(
             question,
             source=image,
             workspace=self._workspace,
@@ -145,6 +142,7 @@ class _VisionFacade:
             thinking=thinking,
             max_tokens=max_tokens,
         )
+        return answer.text
 
 
 class _ModelCache:

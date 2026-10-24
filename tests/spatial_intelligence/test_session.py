@@ -1023,6 +1023,36 @@ class WorkspaceLifecycleTests(SessionTestCase):
         self.assertEqual(restored["outputs"][0]["text"], "Listed.")
         self.assertIn("tool_call", [step["type"] for step in restored["trace"]])
 
+    def test_switching_workspaces_resets_the_live_map_and_restores_on_return(self):
+        state = self.start(answers_with("unused"))
+        first = state.snapshot()["active_workspace"]
+        snapshot = state.snapshot()
+        project = {
+            **snapshot["map_project"],
+            "mapView": {
+                **snapshot["map_project"].get("mapView", {}),
+                "zoom": 9,
+            },
+        }
+        state.set_map_project(
+            project,
+            revision=snapshot["map_revision"],
+            workspace=first,
+        )
+        self.assertGreater(state.workspaces.map_revision, 0)
+
+        state.new_workspace("second")
+        after = state.snapshot()
+        self.assertEqual(after["active_workspace"], "second")
+        self.assertEqual(after["map_revision"], 0)
+        self.assertEqual(after["map_project"]["layers"], [])
+        self.assertEqual(after["jobs"], [])
+
+        state.open_workspace(first)
+        restored = state.snapshot()
+        self.assertEqual(restored["active_workspace"], first)
+        self.assertEqual(restored["map_project"]["mapView"]["zoom"], 9)
+
     def test_run_all_runs_every_runnable_cell_in_order(self):
         state = self.start(answers_with("ok"))
         first = state.add_cell("python", "1 + 1")["cells"][-1]["id"]

@@ -469,6 +469,56 @@ class AppState:
             self.bus.publish("files", {"files": self.list_files()})
             return {"path": relative}
 
+    def detect_drone_files(self, paths: list[str]) -> dict:
+        """List drone photos and georeferenced rasters in a selection.
+
+        This is the read-only half of the import prompt: it inspects headers
+        only, so the browser can show what was detected before anything is
+        converted or added to the live map.
+        """
+        with self.lock:
+            workspace = self._require_workspace()
+            from ..geo import drone
+
+            return drone.detect_files(workspace, paths)
+
+    def import_drone_files(self, paths: list[str], orthorectify: bool = False) -> dict:
+        """Add detected drone files to the live GeoLibre map.
+
+        Orthorectification runs before the session/map locks: it can take
+        seconds to minutes, and holding the locks would stall state polling and
+        every other request for the whole run.
+        """
+        with self.lock:
+            workspace = self._require_workspace()
+            runtime = self.services.runtime
+            if runtime is None:
+                raise ToolInputError("no workspace open")
+
+        prepared = None
+        if orthorectify:
+            from ..geo import orthorectify as ortho_service
+
+            prepared = ortho_service.prepare_orthomosaic(workspace, paths)
+
+        with self.lock, MAP_LOCK:
+            from ..geo import drone
+
+            result = drone.import_files(
+                workspace,
+                self.workspaces.map,
+                runtime.file_url,
+                paths,
+                orthorectify=orthorectify,
+                prepared=prepared,
+            )
+            if result["layers"]:
+                self.workspaces.save_map()
+                self.workspaces.bump_map_revision()
+                self.bus.publish("map", self._map_event())
+                self.bus.publish("files", {"files": self.list_files()})
+            return result
+
     def delete_file(self, path: str) -> dict:
         """Delete a user file and drop any map layer that served it."""
         from ..map.layers import remove_local_sources

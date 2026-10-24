@@ -173,6 +173,14 @@ export function importUrl(url, filename = null) {
   return request("POST", "/api/import/url", { url, filename });
 }
 
+export function detectDroneFiles(paths) {
+  return request("POST", "/api/drone/detect", { paths });
+}
+
+export function importDroneFiles(paths, orthorectify = false) {
+  return request("POST", "/api/drone/import", { paths, orthorectify });
+}
+
 export function deleteWorkspaceFile(path) {
   return request("POST", "/api/files/delete", { path });
 }

@@ -21,6 +21,10 @@ hiddenimports = [
     # dotenv is imported inside a try/except in settings/env.py; without it a
     # user's .env file would be ignored entirely in a frozen build.
     "dotenv",
+    # Orthority is imported lazily by the orthorectification service, and its
+    # OpenCV dependency carries binaries that need the cv2 hook.
+    "orthority",
+    "cv2",
 ]
 
 # Several modules are reached only through import strings (the uvicorn app
@@ -37,6 +41,7 @@ for pkg in (
     "pydantic_ai",
     "pydantic_ai_harness",
     "geolibre",
+    "orthority",
     "rasterio",
     "pyogrio",
     "shapely",
@@ -58,6 +63,7 @@ for dist in (
     "pydantic_ai_harness",
     "logfire",
     "geolibre",
+    "orthority",
 ):
     datas += copy_metadata(dist)
 

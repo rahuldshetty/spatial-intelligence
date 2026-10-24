@@ -43,6 +43,11 @@ dependencies = [
   # `onnxruntime-gpu` provides the same import where CUDA is wanted; install one
   # or the other, never both.
   "onnxruntime>=1.20",
+  # Drone orthorectification. A main dependency because the importer presents
+  # "Build an orthomosaic" as a built-in action, not an optional feature. It is
+  # AGPL-3.0-or-later and pulls OpenCV; the service imports it only when the
+  # user actually runs orthorectification.
+  "orthority>=0.7,<0.8",
 ]
 
 # The `gdal` package (the `osgeo` bindings) is deliberately absent: it publishes no

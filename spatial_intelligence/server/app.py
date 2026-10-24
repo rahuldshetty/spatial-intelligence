@@ -16,7 +16,15 @@ from fastapi.staticfiles import StaticFiles
 from ..contracts.errors import ToolInputError, WorkspaceError
 from . import deps
 from .assets import WEB_DIR
-from .routers import events, files, map as map_router, state, workspace, workflows
+from .routers import (
+    drone,
+    events,
+    files,
+    map as map_router,
+    state,
+    workspace,
+    workflows,
+)
 
 NO_STORE = {"Cache-Control": "no-store"}
 
@@ -67,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(workflows.router)
     app.include_router(workspace.router)
     app.include_router(files.router)
+    app.include_router(drone.router)
     app.include_router(map_router.router)
     app.include_router(events.router)
     app.mount("/static", NoCacheStaticFiles(directory=WEB_DIR), name="static")

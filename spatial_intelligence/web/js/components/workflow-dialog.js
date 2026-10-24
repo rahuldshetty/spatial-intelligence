@@ -19,6 +19,7 @@ import {
   listWorkflows,
 } from "../api.js";
 import { closeDialog, el, formatBytes, openDialog, toast } from "../dom.js";
+import { offerDroneImport } from "./drone-import.js";
 // `state` is the wizard's own draft inside this module, so the store comes in
 // under a name that cannot be shadowed by it.
 import { applySnapshot, state as appState } from "../store.js";
@@ -456,6 +457,12 @@ export function openWorkflowDialog() {
         return attachments.some((item) => item.state === "error");
       }
 
+      function importedAttachmentPaths() {
+        return attachments
+          .filter((item) => item.state === "done" && item.path)
+          .map((item) => item.path);
+      }
+
       function heading(workflow) {
         const row = el("div", { class: "wizard-heading-row" });
         const copy = el("div", { class: "wizard-heading-copy" });
@@ -719,8 +726,10 @@ export function openWorkflowDialog() {
           applySnapshot(await getState());
           creating = false;
           if (!failed) {
+            const dronePaths = importedAttachmentPaths();
             closeDialog();
             toast("Workspace " + state.name + " created", "success");
+            if (dronePaths.length) await offerDroneImport(dronePaths);
             return;
           }
           retryMode = true;
@@ -753,8 +762,10 @@ export function openWorkflowDialog() {
           applySnapshot(await getState());
           creating = false;
           if (!failed) {
+            const dronePaths = importedAttachmentPaths();
             closeDialog();
             toast("Workspace " + state.name + " created", "success");
+            if (dronePaths.length) await offerDroneImport(dronePaths);
             return;
           }
           retryMode = true;

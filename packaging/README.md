@@ -143,9 +143,10 @@ optional. The rest of the app (map, python cells, file data) works without one.
    `dist/spatial-intelligence/`. The spec collects everything PyInstaller
    cannot see statically: the `spatial_intelligence` submodules reached only
    through import strings, the `web/` assets, pydantic-ai's name-resolved
-   providers/models, pydantic-ai-harness and geolibre data, and the geo-stack
-   wheels' data files (proj.db, GDAL resources) plus uvicorn's
-   import-string-loaded loop/protocol modules.
+   providers/models, pydantic-ai-harness, geolibre and orthority data, the
+   OpenCV binaries orthority imports, and the geo-stack wheels' data files
+   (proj.db, GDAL resources) plus uvicorn's import-string-loaded loop/protocol
+   modules.
 4. AppDir assembly (`usr/bin/spatial-intelligence`, desktop file, icon,
    `.DirIcon`) and `appimagetool --appimage-extract-and-run` to produce the
    AppImage.

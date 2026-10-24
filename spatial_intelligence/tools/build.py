@@ -19,6 +19,7 @@ from ..contracts.services import VISION_SERVICE
 from .packs.ai import AIPack
 from .packs.capabilities import CapabilityPack
 from .packs.catalog import CatalogPack
+from .packs.conversation import ConversationPack
 from .packs.detection import DetectionPack
 from .packs.files import FilesPack
 from .packs.interaction import InteractionPack
@@ -82,6 +83,8 @@ PACK_ORDER: tuple[type, ...] = (
     # run looks like.
     InteractionPack,
     CapabilityPack,
+    # Context from earlier prompts, before the model routes to data tools.
+    ConversationPack,
     # Orientation and data acquisition.
     FilesPack,
     CatalogPack,

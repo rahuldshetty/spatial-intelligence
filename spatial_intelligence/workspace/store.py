@@ -53,6 +53,11 @@ class Workspace:
         return self.root / _paths.TRACES
 
     @property
+    def conversation_db(self) -> Path:
+        """The searchable index of this workspace's earlier prompts and steps."""
+        return self.traces / "conversation.db"
+
+    @property
     def manifest_path(self) -> Path:
         return self._manifest_path
 

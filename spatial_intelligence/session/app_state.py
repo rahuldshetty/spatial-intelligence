@@ -10,6 +10,8 @@ queue on a single worker thread.
 from __future__ import annotations
 
 import shutil
+import sqlite3
+import sys
 import threading
 import traceback
 
@@ -20,6 +22,7 @@ from ..agent.runner import PromptRunner, RunnerHooks
 from ..agent.vision import VisionService
 from ..ai import profiles
 from ..contracts.errors import ToolInputError
+from ..contracts.ids import new_id
 from ..map.bridge import reset_bridge
 from ..map import MAP_LOCK
 from ..settings import prefs
@@ -35,6 +38,8 @@ from ..tools.config_store import (
 )
 from ..tools.runtime import ToolRuntime, bind
 from ..workflows import library
+from ..workspace import traces
+from ..workspace.conversation import ConversationStore
 from .bus import EventBus
 from .capture import CaptureBroker
 from .jobs import JobRegistry
@@ -66,6 +71,7 @@ class AppState:
         self.runs = RunQueue()
         self.notebook = NotebookSession()
         self.workspaces = WorkspaceSession()
+        self.conversation = ConversationStore()
         self.capture = CaptureBroker(self.bus)
         self.map_bridge = MapBridgeBroker(self.bus)
         self.vision = VisionService(
@@ -85,6 +91,8 @@ class AppState:
             vision=self.vision,
             capture=self.capture,
             map_bridge=self.map_bridge,
+            conversation=self.conversation,
+            recall=self._publish_recall,
         )
         self._worker: threading.Thread | None = None
         if worker:
@@ -298,6 +306,23 @@ class AppState:
         self.services.map_notifier.reset()
         self.jobs.clear()
         self.services.unbind()
+        self.conversation.close()
+
+    def _open_conversation(self, workspace) -> None:
+        """Open this workspace's history index, tolerating a bad database file.
+
+        The index is a convenience for follow-up questions, not part of the
+        workspace's own data: a corrupt or unwritable file must not make the
+        workspace impossible to open. The recall tool reports it unavailable.
+        """
+        try:
+            self.conversation.open_at(workspace.conversation_db)
+        except (sqlite3.Error, OSError) as exc:
+            self.conversation.close()
+            print(
+                f"spatial-intelligence: conversation index unavailable: {exc}",
+                file=sys.stderr,
+            )
 
     def open_workspace(self, name: str) -> dict:
         """Open a workspace, binding a fresh runtime and agent to it."""
@@ -311,6 +336,7 @@ class AppState:
             if name != previous:
                 self._leave_workspace("the workspace changed")
             self.notebook.load(workspace)
+            self._open_conversation(workspace)
             self.jobs.clear()
             runtime = self.services.bind(workspace, self.workspaces.map)
             from ..map.layers import repoint_local_rasters
@@ -358,6 +384,7 @@ class AppState:
                 self.notebook.close()
                 self.jobs.clear()
                 self.services.unbind()
+                self.conversation.close()
             # Only ever reached when something failed *after* the directory was
             # created by this call: `new` refuses an existing name, so nothing
             # here can hold a user's work.
@@ -484,6 +511,7 @@ class AppState:
             if self.notebook.find_or_none(cell_id) is None:
                 return self.snapshot()
             self.notebook.delete(cell_id)
+            self.conversation.forget_cell(cell_id)
             self.jobs.clear_parent(cell_id)
             self.bus.publish("cell_deleted", {"id": cell_id})
             return self.snapshot()
@@ -503,6 +531,9 @@ class AppState:
             # this cell from the event, so the previous run's output and trace
             # cannot survive into the new one.
             cell = self.notebook.begin_run(cell_id)
+            # A fresh run replaces the cell's trace, so it replaces its indexed
+            # rows too. The runner indexes the new prompt when it starts.
+            self.conversation.forget_cell(cell_id)
             self.jobs.clear_parent(cell_id)
             self.bus.publish("cell", cell)
         self.runs.submit(cell_id)
@@ -756,6 +787,7 @@ class AppState:
         """
         worker = self._worker
         if worker is None:
+            self.conversation.close()
             return True
         self.runs.wait_idle(timeout)
         self.runs.shutdown()
@@ -763,6 +795,7 @@ class AppState:
         if worker.is_alive():
             return False
         self._worker = None
+        self.conversation.close()
         return True
 
     def _worker_loop(self) -> None:
@@ -868,12 +901,68 @@ class AppState:
             publish_trace=lambda cell_id, step: self.bus.publish(
                 "trace", {"id": cell_id, "step": step}
             ),
+            conversation_begin=self._conversation_begin,
+            conversation_resume=self._conversation_resume,
+            conversation_step=self._conversation_step,
+            conversation_result=self._conversation_result,
             find_recorded_tool=self.notebook.find_recorded_tool,
             record_tool_call=self.notebook.record_tool_call,
             record_tool_result=self.notebook.record_tool_result,
             record_agent_response=self.notebook.record_agent_response,
             mark_tool_waiting=self.notebook.mark_tool_waiting,
         )
+
+    # -- conversation history --------------------------------------------
+
+    def _conversation_begin(self, cell_id: str, run_id: str, prompt: str) -> None:
+        """Index a run's prompt, unless the cell was deleted in the meantime."""
+        with self.lock:
+            if self.notebook.find_or_none(cell_id) is None:
+                return
+            self.conversation.begin_run(cell_id, run_id, prompt)
+
+    def _conversation_resume(self, cell_id: str, run_id: str, answers: dict) -> None:
+        """Index a resumed run's answers as its prompt."""
+        with self.lock:
+            if self.notebook.find_or_none(cell_id) is None:
+                return
+            self.conversation.index_resume(cell_id, run_id, answers)
+
+    def _conversation_step(self, cell_id: str, step: dict, step_index: int) -> None:
+        """Index one streamed tool call or result next to its trace step."""
+        with self.lock:
+            if self.notebook.find_or_none(cell_id) is None:
+                return
+            self.conversation.index_step(cell_id, step, step_index)
+
+    def _conversation_result(
+        self,
+        cell_id: str,
+        status: str,
+        output: str | None,
+        error: str | None,
+    ) -> None:
+        """Index a finished run's answer or failure."""
+        with self.lock:
+            if self.notebook.find_or_none(cell_id) is None:
+                return
+            self.conversation.index_result(cell_id, status, output, error)
+
+    def _publish_recall(self, cell_id: str | None, payload: dict) -> None:
+        """Append a history-recall step to the running cell's trace."""
+        if not cell_id:
+            return
+        with self.lock:
+            cell = self.notebook.find_or_none(cell_id)
+            if cell is None:
+                return
+            step = {"type": "recall", "id": new_id(), **payload}
+            trace = cell.setdefault("trace", [])
+            trace.append(step)
+            path = self.notebook.trace_path(cell_id)
+            if path is not None:
+                traces.append_step(path, step)
+            self.bus.publish("trace", {"id": cell_id, "step": step})
 
     # -- helpers ---------------------------------------------------------
 

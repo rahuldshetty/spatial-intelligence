@@ -1061,6 +1061,36 @@ const scenarios = {
     };
   },
 
+  async recall_trace() {
+    globalThis.marked = marked;
+    const cell = makeCell({
+      id: "c4",
+      kind: "prompt",
+      status: "done",
+      trace: [
+        {
+          type: "recall",
+          id: "rec1",
+          query: "NDVI north field",
+          terms: ["NDVI", "north", "field"],
+          results: [
+            {
+              cell_id: "c1",
+              prompt_id: 7,
+              kind: "tool_result",
+              tool_name: "spectral_index",
+              step_index: 4,
+              hint: "spectral_index result: wrote results/ndvi.tif",
+              prompt: "Compute NDVI over the north field",
+            },
+          ],
+        },
+        { type: "recall", id: "rec2", query: "nothing", terms: ["nothing"], results: [] },
+      ],
+    });
+    return { rendered: trace.renderTrace(cell).map(dump) };
+  },
+
   async interaction() {
     const request = {
       id: "i1",
@@ -1649,6 +1679,29 @@ class RenderTraceTests(ScenarioCase):
         self.assertIn("trace-plan", plan[0]["class"])
         self.assertIn("clipping", plan[0]["text"])
         self.assertIn("1/2 done", plan[0]["text"])
+
+
+class RecallTraceTests(ScenarioCase):
+    SCENARIO = "recall_trace"
+
+    def test_a_recall_step_shows_terms_step_and_an_ellipsised_hint(self):
+        rendered = self.result["rendered"]
+        self.assertEqual(len(rendered), 2)
+
+        hit = rendered[0]
+        self.assertIn("trace-recall", hit["class"])
+        self.assertIn("history recall", hit["text"])
+        self.assertIn("NDVI north field", hit["text"])
+        self.assertIn("NDVI", hit["text"])
+        self.assertIn("spectral_index", hit["text"])
+        self.assertIn("wrote results/ndvi.tif", hit["text"])
+        self.assertIn("prompt 7", hit["text"])
+        self.assertIn("step 4", hit["text"])
+        self.assertIn("Compute NDVI over the north field", hit["text"])
+
+        empty = rendered[1]
+        self.assertIn("trace-recall", empty["class"])
+        self.assertIn("No earlier prompt matched.", empty["text"])
 
 
 class InteractionTests(ScenarioCase):

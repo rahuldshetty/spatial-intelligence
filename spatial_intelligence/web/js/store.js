@@ -111,6 +111,7 @@ export function applySnapshot(snapshot) {
 export function stepKey(step) {
   if (!step) return "";
   if (step.tool_call_id) return step.type + ":" + step.tool_call_id;
+  if (step.type === "recall") return "recall:" + (step.id || step.query || "");
   if (step.type === "plan") return "plan:" + JSON.stringify(step.items || []);
   if (step.type === "usage") return "usage:" + JSON.stringify(step.usage || null);
   return (

@@ -18,7 +18,12 @@ from ..agent.builder import BuiltAgent, build_agent
 from ..agent.vision import VisionService
 from ..ai.manager import MANAGER_SERVICE
 from ..contracts.errors import RuntimeNotBoundError
-from ..contracts.services import CAPTURE_SERVICE, MAP_BRIDGE_SERVICE, VISION_SERVICE
+from ..contracts.services import (
+    CAPTURE_SERVICE,
+    CONVERSATION_SERVICE,
+    MAP_BRIDGE_SERVICE,
+    VISION_SERVICE,
+)
 from ..pythonruntime.policy import PythonPolicy
 from ..settings.env import server_base_url
 from ..tools.build import default_registry
@@ -93,6 +98,8 @@ class SessionServices:
         vision: VisionService | None = None,
         capture: CaptureBroker | None = None,
         map_bridge: MapBridgeBroker | None = None,
+        conversation: Any | None = None,
+        recall: Callable[[str | None, dict], None] | None = None,
     ) -> None:
         self._bus = bus
         self._jobs = jobs
@@ -106,6 +113,8 @@ class SessionServices:
         self._vision = vision
         self._capture = capture
         self._map_bridge = map_bridge
+        self._conversation = conversation
+        self._recall = recall
         self._registry: ToolRegistry | None = None
         self._runtime: ToolRuntime | None = None
         self._built: BuiltAgent | None = None
@@ -158,6 +167,7 @@ class SessionServices:
             events=RuntimeEvents(
                 files_changed=self._publish_files,
                 map_changed=self._map_changed,
+                recall=self._recall,
             ),
             base_url=self._base_url,
             approved=self._approval_granted(),
@@ -175,6 +185,8 @@ class SessionServices:
             runtime.services[CAPTURE_SERVICE] = self._capture
         if self._map_bridge is not None:
             runtime.services[MAP_BRIDGE_SERVICE] = self._map_bridge
+        if self._conversation is not None:
+            runtime.services[CONVERSATION_SERVICE] = self._conversation
         registry = default_registry(runtime)
         apply_tool_config(registry, config)
         # The capability pack reads the registry back out of the service bag, so

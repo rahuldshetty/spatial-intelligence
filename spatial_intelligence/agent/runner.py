@@ -457,6 +457,7 @@ class PromptRunner:
                     usage=usage,
                     conversation_id=result.conversation_id,
                 )
+            hooks.conversation_result(cell_id, "waiting_for_input", None, None)
             return RunOutcome(
                 status="waiting_for_input",
                 interaction=interaction,

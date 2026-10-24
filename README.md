@@ -64,10 +64,10 @@ every output is a real file in the workspace you can inspect or reuse.
 
 - Everything is a file you own: inputs in `data/`, outputs in `results/`,
   projects in `maps/`, run traces in `traces/`, cells in `notebook.ipynb`.
-- Follow-up questions can recall earlier work: every prompt, tool call, and
-  result is indexed for the workspace, and the agent searches that index only
-  when a request refers back to it. The search appears in the trace with its
-  terms and the matching excerpts.
+- Follow-up questions can recall earlier work: every prompt, visible assistant
+  note, tool call, and result is indexed for the workspace (model reasoning is
+  not), and the agent searches that index only when a request refers back to
+  it. The search appears in the trace with its terms and matching excerpts.
 - `run_python` runs your own Python against the same geospatial stack when no
   tool fits.
 
@@ -205,7 +205,7 @@ data/     inputs: imports, downloads, dropped files — read here
 results/  outputs: GeoTIFF/COG, GeoJSON, tables — written here
 maps/     saved .geolibre.json map projects
 traces/   per-cell agent run logs: steps, plan, token usage
-          conversation.db: searchable index of prompts, tool calls, and results
+          conversation.db: searchable index of prompts, notes, tool calls, results
 notebook.ipynb   your cells, plus recorded agent steps
 workspace.json   manifest: outputs and version
 ```

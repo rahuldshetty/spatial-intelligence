@@ -2,10 +2,11 @@
 
 The agent's trace files stay the record of a run, but they are append-only JSONL
 per cell and not searchable. This module mirrors the parts of a run that answer a
-follow-up question -- the prompt, each tool call and its result, and the final
-answer -- into one SQLite database under ``<workspace>/traces/``. Reasoning text
-(``text``/``text_delta`` steps) is deliberately not indexed: it is the largest
-part of a trace and the least useful to recall.
+follow-up question -- the prompt, visible assistant notes, each tool call and its
+result, and the final answer -- into one SQLite database under
+``<workspace>/traces/``. Reasoning text (steps marked ``reasoning``) is
+deliberately not indexed, and the streamed answer block is folded into the final
+answer so the same text is not stored twice.
 
 Every row records the prompt cell it belongs to (``cell_id``), the run, the
 trace position, and the row id of the prompt that introduced it (``prompt_id``),
@@ -112,6 +113,9 @@ class ConversationStore:
         self._conn: sqlite3.Connection | None = None
         # cell_id -> (prompt row id, run id) for the run currently streaming.
         self._active: dict[str, tuple[int | None, str | None]] = {}
+        # cell_id -> [first trace index, text chunks] for visible assistant text
+        # that has not reached a block boundary yet.
+        self._pending_text: dict[str, list] = {}
 
     # -- lifecycle -------------------------------------------------------
 
@@ -154,6 +158,7 @@ class ConversationStore:
             conn = self._conn
             self._conn = None
             self._active.clear()
+            self._pending_text.clear()
             if conn is not None:
                 conn.close()
 
@@ -210,6 +215,7 @@ class ConversationStore:
                 return
             with conn:
                 conn.execute("DELETE FROM conversation_units WHERE cell_id=?", (cell_id,))
+                self._pending_text.pop(cell_id, None)
                 self._active[cell_id] = (None, run_id)
                 if not text:
                     return
@@ -236,6 +242,7 @@ class ConversationStore:
             conn = self._conn
             if conn is None:
                 return
+            self._flush_text(cell_id, conn)
             with conn:
                 cursor = conn.execute(
                     """
@@ -258,16 +265,27 @@ class ConversationStore:
                 )
 
     def index_step(self, cell_id: str, step: dict, step_index: int | None) -> None:
-        """Index one streamed trace step (tool calls and tool results only)."""
-        parsed = _step_text(step or {})
-        if parsed is None:
-            return
-        kind, text = parsed
-        if not text:
-            return
+        """Index one trace step: tool calls/results and visible assistant text.
+
+        Assistant text is streamed as many deltas, so it is accumulated and
+        stored once per block. Reasoning deltas (``reasoning``) flush any
+        visible block but are never stored themselves.
+        """
+        step = step or {}
+        kind = step.get("type")
         with self._lock:
             conn = self._conn
             if conn is None:
+                return
+            if kind in ("text", "text_delta"):
+                self._index_text(cell_id, conn, step, kind, step_index)
+                return
+            self._flush_text(cell_id, conn)
+            parsed = _step_text(step)
+            if parsed is None:
+                return
+            kind, text = parsed
+            if not text:
                 return
             prompt_id, run_id = self._active.get(cell_id, (None, None))
             with conn:
@@ -291,6 +309,53 @@ class ConversationStore:
                     ),
                 )
 
+    def _index_text(
+        self,
+        cell_id: str,
+        conn: sqlite3.Connection,
+        step: dict,
+        kind: str,
+        step_index: int | None,
+    ) -> None:
+        """Accumulate one visible text step; skip model reasoning."""
+        if step.get("reasoning"):
+            self._flush_text(cell_id, conn)
+            return
+        content = step.get("content") or ""
+        if not content:
+            return
+        pending = self._pending_text.get(cell_id)
+        # A part_start opens a new text part, so anything buffered belongs to
+        # the previous one.
+        if kind == "text" and pending is not None:
+            self._flush_text(cell_id, conn)
+            pending = None
+        if pending is None:
+            self._pending_text[cell_id] = [step_index, [content]]
+        else:
+            pending[1].append(content)
+
+    def _flush_text(self, cell_id: str, conn: sqlite3.Connection) -> None:
+        """Store the accumulated visible text as one ``assistant`` unit."""
+        pending = self._pending_text.pop(cell_id, None)
+        if pending is None:
+            return
+        index, chunks = pending
+        text = _clip(_clean("".join(chunks)))
+        if not text:
+            return
+        prompt_id, run_id = self._active.get(cell_id, (None, None))
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO conversation_units
+                    (cell_id, prompt_id, run_id, kind, step_index, step_id,
+                     tool_name, text, created_at)
+                VALUES (?, ?, ?, 'assistant', ?, NULL, NULL, ?, ?)
+                """,
+                (cell_id, prompt_id, run_id, index, text, now_iso()),
+            )
+
     def index_result(
         self,
         cell_id: str,
@@ -300,14 +365,18 @@ class ConversationStore:
     ) -> None:
         """Index the final answer (or the failure) of a run."""
         text = output if status == "done" else error or output
-        if not text:
-            return
-        kind = "response" if status == "done" else "error"
         with self._lock:
             conn = self._conn
             if conn is None:
                 return
+            # The last visible text block is the answer streamed back to the
+            # browser; the result below stores the same answer once.
+            self._flush_text(cell_id, conn)
+            if not text:
+                return
+            kind = "response" if status == "done" else "error"
             prompt_id, run_id = self._active.get(cell_id, (None, None))
+            normalized = _clip(_clean(text))
             with conn:
                 conn.execute(
                     """
@@ -316,13 +385,35 @@ class ConversationStore:
                          tool_name, text, created_at)
                     VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
                     """,
-                    (cell_id, prompt_id, run_id, kind, _clip(_clean(text)), now_iso()),
+                    (cell_id, prompt_id, run_id, kind, normalized, now_iso()),
                 )
+            if status == "done":
+                self._drop_duplicate_answer(cell_id, conn, normalized)
+
+    @staticmethod
+    def _drop_duplicate_answer(
+        cell_id: str, conn: sqlite3.Connection, answer: str
+    ) -> None:
+        """Remove trailing assistant blocks that only repeat the final answer."""
+        while True:
+            row = conn.execute(
+                """
+                SELECT id, text FROM conversation_units
+                 WHERE cell_id=? AND kind='assistant'
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (cell_id,),
+            ).fetchone()
+            if row is None or _clean(row["text"]) != answer:
+                return
+            with conn:
+                conn.execute("DELETE FROM conversation_units WHERE id=?", (row["id"],))
 
     def forget_cell(self, cell_id: str) -> None:
         """Drop every row belonging to one prompt cell."""
         with self._lock:
             self._active.pop(cell_id, None)
+            self._pending_text.pop(cell_id, None)
             conn = self._conn
             if conn is None:
                 return

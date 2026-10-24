@@ -41,7 +41,8 @@ class ConversationPack:
 
         Returns ``query``, ``terms``, ``count``, and ``results``. A result has
         ``reference``, ``cell_id``, ``prompt_id``, ``run_id``, ``kind``
-        (``prompt``, ``tool_call``, ``tool_result``, ``response``, or ``error``),
+        (``prompt``, ``assistant``, ``tool_call``, ``tool_result``,
+        ``response``, or ``error``),
         ``step_index``, ``tool_name``, ``hint``, ``prompt``, and ``answer``.
         """
         text = (query or "").strip()

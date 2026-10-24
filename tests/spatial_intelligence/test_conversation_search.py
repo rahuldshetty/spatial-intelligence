@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from pydantic_ai.models.function import DeltaToolCall
 
+from spatial_intelligence.agent.events import step_from_event
 from spatial_intelligence.contracts.errors import ToolInputError
 from spatial_intelligence.contracts.services import CONVERSATION_SERVICE
 from spatial_intelligence.tools.packs.conversation import ConversationPack
@@ -24,6 +25,34 @@ from spatial_intelligence.workspace.conversation import (
 
 from .support import answered_tools, scripted, stream_model
 from .test_session import TERMINAL_STATUSES, SessionTestCase
+
+
+class TraceEventTests(unittest.TestCase):
+    def test_thinking_is_marked_reasoning_but_visible_text_is_not(self):
+        thinking = SimpleNamespace(
+            event_kind="part_start",
+            part=SimpleNamespace(part_kind="thinking", content="private"),
+        )
+        visible = SimpleNamespace(
+            event_kind="part_start",
+            part=SimpleNamespace(part_kind="text", content="public"),
+        )
+        delta = SimpleNamespace(
+            event_kind="part_delta",
+            delta=SimpleNamespace(part_delta_kind="thinking", content_delta="more"),
+        )
+
+        self.assertEqual(
+            step_from_event(thinking),
+            {"type": "text", "content": "private", "reasoning": True},
+        )
+        self.assertEqual(
+            step_from_event(visible), {"type": "text", "content": "public"}
+        )
+        self.assertEqual(
+            step_from_event(delta),
+            {"type": "text_delta", "content": "more", "reasoning": True},
+        )
 
 
 class ConversationStoreTests(unittest.TestCase):
@@ -44,6 +73,7 @@ class ConversationStoreTests(unittest.TestCase):
             {
                 "type": "text_delta",
                 "content": "I should inspect the raster first",
+                "reasoning": True,
             },
             0,
         )
@@ -86,6 +116,56 @@ class ConversationStoreTests(unittest.TestCase):
 
         # The reasoning delta was not indexed.
         self.assertEqual(self.store.search("inspect"), [])
+
+    def test_visible_text_is_indexed_once_per_block_and_the_answer_is_not_duplicated(self):
+        self.store.begin_run("c1", "r1", "Compute NDVI over the north field")
+        self.store.index_step(
+            "c1", {"type": "text", "content": "The raster has 4 bands. "}, 0
+        )
+        self.store.index_step(
+            "c1", {"type": "text_delta", "content": "NDVI is the right index."}, 1
+        )
+        self.store.index_step(
+            "c1",
+            {"type": "tool_call", "name": "spectral_index", "args": {}, "tool_call_id": "t1"},
+            2,
+        )
+        self.store.index_step(
+            "c1", {"type": "text", "content": "The answer is "}, 3
+        )
+        self.store.index_step(
+            "c1", {"type": "text_delta", "content": "0.62."}, 4
+        )
+        self.store.index_result("c1", "done", "The answer is 0.62.", None)
+
+        blocks = [
+            hit for hit in self.store.search("raster bands NDVI")
+            if hit["kind"] == "assistant"
+        ]
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["step_index"], 0)
+        self.assertIn("4 bands", blocks[0]["hint"])
+
+        answer_hits = self.store.search("answer")
+        self.assertEqual([hit["kind"] for hit in answer_hits], ["response"])
+        self.assertEqual(self.store.unit_count("c1"), 4)
+
+    def test_reasoning_deltas_are_skipped_even_between_visible_blocks(self):
+        self.store.begin_run("c1", "r1", "Inspect the raster")
+        self.store.index_step("c1", {"type": "text", "content": "Visible one. "}, 0)
+        self.store.index_step(
+            "c1",
+            {"type": "text_delta", "content": "secret chain of thought", "reasoning": True},
+            1,
+        )
+        self.store.index_step("c1", {"type": "text", "content": "Visible two."}, 2)
+        self.store.index_result("c1", "stopped", None, None)
+
+        self.assertEqual(self.store.search("secret"), [])
+        self.assertEqual(
+            [hit["kind"] for hit in self.store.search("visible")],
+            ["assistant", "assistant"],
+        )
 
     def test_a_rerun_replaces_the_cells_rows(self):
         self.store.begin_run("c1", "r1", "first attempt with NDVI")

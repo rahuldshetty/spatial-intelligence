@@ -22,6 +22,7 @@ from .routers import (
     files,
     map as map_router,
     state,
+    tools,
     workspace,
     workflows,
 )
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Spatial Intelligence", lifespan=_lifespan)
     _register_error_handlers(app)
     app.include_router(state.router)
+    app.include_router(tools.router)
     app.include_router(workflows.router)
     app.include_router(workspace.router)
     app.include_router(files.router)

@@ -17,6 +17,7 @@ from typing import Any
 
 from ..contracts.errors import RuntimeNotBoundError, ToolInputError
 from ..contracts.progress import NULL_REPORTER, Reporter
+from ..pythonruntime.policy import PythonPolicy
 from ..workspace import Workspace
 from ..workspace.files import MAX_READ_BYTES
 
@@ -61,6 +62,9 @@ class ToolRuntime:
         base_url: Origin under which the server serves workspace files.
         run_id: The run this runtime belongs to, if any.
         approved: Whether the user granted approval (dangerous mode).
+        tool_config: The effective tool configuration for the session
+            (registered tools and run_python options).
+        python_policy: The import/helper policy derived from ``tool_config``.
     """
 
     workspace: Workspace
@@ -71,6 +75,8 @@ class ToolRuntime:
     run_id: str | None = None
     approved: bool = False
     services: dict[str, Any] = field(default_factory=dict)
+    tool_config: dict[str, Any] = field(default_factory=dict)
+    python_policy: PythonPolicy = field(default_factory=PythonPolicy)
     #: Bytes one read may hand the model; derived from the context window.
     max_read_bytes: int = MAX_READ_BYTES
 

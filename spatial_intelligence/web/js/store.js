@@ -26,6 +26,8 @@ export const state = {
   jobs: [],
   selected_tab: "Cells",
   settings: { ...DEFAULT_SETTINGS },
+  tool_config: null,
+  tool_config_source: "global",
   vision: null,
   running_cell: null,
 };
@@ -95,6 +97,8 @@ export function applySnapshot(snapshot) {
     files: snap.files || [],
     jobs: snap.jobs || [],
     settings: snap.settings || state.settings,
+    tool_config: snap.tool_config || state.tool_config,
+    tool_config_source: snap.tool_config_source || state.tool_config_source,
     vision: snap.vision != null ? snap.vision : state.vision,
     running_cell: snap.running_cell != null ? snap.running_cell : null,
   });

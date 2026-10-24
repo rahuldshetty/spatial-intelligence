@@ -12,6 +12,7 @@ const EVENT_ROUTES = [
   "map",
   "files",
   "settings",
+  "tool_config",
   "vision",
   "running",
   "map_capture",

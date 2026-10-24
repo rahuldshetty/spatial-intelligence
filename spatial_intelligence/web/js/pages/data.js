@@ -17,6 +17,7 @@ import { offerDroneImport } from "../components/drone-import.js";
 const HARNESS_FILES = new Set([
   "notebook.ipynb",
   "workspace.json",
+  "tools.json",
   "maps/current.geolibre.json",
 ]);
 

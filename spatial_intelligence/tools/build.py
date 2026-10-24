@@ -31,6 +31,7 @@ from .packs.vector import VectorPack
 from .packs.vision import VisionPack
 from .registry import PLAN_MUTATION_TAG, ToolRegistry
 from .runtime import ToolRuntime
+from .spec import ToolSpec, declared_methods, pack_defaults_of
 
 #: Plan tools registered by ``pydantic_ai_harness.Planning``. They are declared
 #: here because the runner must recognize a plan-changing tool call to snapshot
@@ -74,6 +75,31 @@ _PLAN_SUMMARIES = {
 }
 
 
+#: Packs in the order the model should read them. ``VisionPack`` is skipped
+#: when the endpoint cannot accept images.
+PACK_ORDER: tuple[type, ...] = (
+    # Routing and human-in-the-loop first: these decide what the rest of the
+    # run looks like.
+    InteractionPack,
+    CapabilityPack,
+    # Orientation and data acquisition.
+    FilesPack,
+    CatalogPack,
+    # Map authoring, then image understanding when the model supports it.
+    LayersPack,
+    VisionPack,
+    # Processing.
+    RasterPack,
+    VectorPack,
+    # Local models: the cache and its memory first, then the tasks that use them.
+    AIPack,
+    SegmentationPack,
+    DetectionPack,
+    PythonPack,
+    SkillsPack,
+)
+
+
 def default_registry(runtime: ToolRuntime) -> ToolRegistry:
     """Build the session's registry: every pack, then the external tools.
 
@@ -82,60 +108,73 @@ def default_registry(runtime: ToolRuntime) -> ToolRegistry:
     workspace open rather than silently dropping a tool.
     """
     registry = ToolRegistry()
-    # Routing and human-in-the-loop first: these decide what the rest of the
-    # run looks like.
-    registry.add_pack(InteractionPack, runtime)
-    registry.add_pack(CapabilityPack, runtime)
-    # Orientation and data acquisition.
-    registry.add_pack(FilesPack, runtime)
-    registry.add_pack(CatalogPack, runtime)
-    # Map authoring, plus the image tool only when the endpoint proved it can
-    # accept images. A text-only model must not see a tool it cannot serve.
-    registry.add_pack(LayersPack, runtime)
     vision = runtime.services.get(VISION_SERVICE)
-    if vision is not None and getattr(vision, "supported", False):
-        registry.add_pack(VisionPack, runtime)
-    # Processing.
-    registry.add_pack(RasterPack, runtime)
-    registry.add_pack(VectorPack, runtime)
-    # Local models: the cache and its memory first, then the tasks that use them.
-    registry.add_pack(AIPack, runtime)
-    registry.add_pack(SegmentationPack, runtime)
-    registry.add_pack(DetectionPack, runtime)
-    registry.add_pack(PythonPack, runtime)
-    registry.add_pack(SkillsPack, runtime)
+    vision_supported = vision is not None and getattr(vision, "supported", False)
+    for pack in PACK_ORDER:
+        if pack is VisionPack and not vision_supported:
+            continue
+        registry.add_pack(pack, runtime)
     register_external_tools(registry)
     return registry
 
 
-def register_external_tools(registry: ToolRegistry) -> list[str]:
-    """Classify the tools other capabilities register on the agent."""
-    added: list[str] = []
+def declared_specs() -> list[ToolSpec]:
+    """Return every declared tool without instantiating a pack.
+
+    Tool Configuration needs the complete catalog even before a workspace is
+    open, when no runtime exists to construct a pack against. The declarations
+    carry the same name, summary, category, core flag, and origin the registry
+    would use; ``fn`` is the unbound method, which is enough for display and
+    never called. ``VisionPack`` is included here unconditionally and marked
+    unavailable by the catalog payload when the model cannot accept images.
+    """
+    specs: list[ToolSpec] = []
+    for pack in PACK_ORDER:
+        defaults = pack_defaults_of(pack)
+        for attribute, declaration in declared_methods(pack):
+            specs.append(declaration.resolve(getattr(pack, attribute), pack=defaults))
+    specs.extend(external_specs())
+    return specs
+
+
+def external_specs() -> list[ToolSpec]:
+    """Return the declarative specs for tools other capabilities register."""
+    specs: list[ToolSpec] = []
     for name in PLAN_TOOL_NAMES:
         capabilities = (PLAN_MUTATION_TAG,) if name in PLAN_MUTATION_NAMES else ()
-        registry.add_external(
-            name,
-            category="plan",
-            origin="harness",
-            summary=_PLAN_SUMMARIES.get(name, name.replace("_", " ")),
-            effects=READ_ONLY,
-            capabilities=capabilities,
+        specs.append(
+            ToolSpec(
+                name=name,
+                category="plan",
+                origin="harness",
+                summary=_PLAN_SUMMARIES.get(name, name.replace("_", " ")),
+                effects=READ_ONLY,
+                capabilities=capabilities,
+            )
         )
-        added.append(name)
-    registry.add_external(
-        TOOL_SEARCH_NAME,
-        category="search",
-        origin="toolsearch",
-        summary="Search the deferred tools by name and description.",
-        effects=READ_ONLY,
+    specs.append(
+        ToolSpec(
+            name=TOOL_SEARCH_NAME,
+            category="search",
+            origin="toolsearch",
+            summary="Search the deferred tools by name and description.",
+            effects=READ_ONLY,
+        )
     )
-    added.append(TOOL_SEARCH_NAME)
-    registry.add_external(
-        WEB_SEARCH_NAME,
-        category="web",
-        origin="capability",
-        summary="Search the web for documentation, provider terms, or current facts.",
-        effects=frozenset({Effect.READ, Effect.NETWORK}),
+    specs.append(
+        ToolSpec(
+            name=WEB_SEARCH_NAME,
+            category="web",
+            origin="capability",
+            summary="Search the web for documentation, provider terms, or current facts.",
+            effects=frozenset({Effect.READ, Effect.NETWORK}),
+        )
     )
-    added.append(WEB_SEARCH_NAME)
-    return added
+    return specs
+
+
+def register_external_tools(registry: ToolRegistry) -> list[str]:
+    """Classify the tools other capabilities register on the agent."""
+    specs = external_specs()
+    registry.add_all(specs)
+    return [spec.name for spec in specs]

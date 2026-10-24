@@ -56,9 +56,12 @@ BLOCKED_ATTR_CALLS = frozenset({
 })
 
 
-def allowed_imports() -> frozenset[str]:
-    """The core stack plus whatever optional packages this machine has."""
-    return ALLOWED_IMPORTS | packages.optional_roots()
+def allowed_imports(policy: object | None = None) -> frozenset[str]:
+    """The core stack plus installed optional packages, minus user-disabled roots."""
+    permitted = ALLOWED_IMPORTS | packages.optional_roots()
+    if policy is None:
+        return permitted
+    return frozenset(root for root in permitted if policy.allows_import(root))
 
 
 def dotted_name(node: ast.AST) -> str | None:
@@ -72,33 +75,36 @@ def dotted_name(node: ast.AST) -> str | None:
     return None
 
 
-def _reject(root: str, *, from_import: bool = False) -> str:
+def _reject(root: str, *, from_import: bool = False, policy: object | None = None) -> str:
     """Return the message for an import of ``root`` that safe mode refuses."""
-    missing = packages.import_error(root)
+    verb = "import from" if from_import else "import of"
+    if policy is not None and not policy.allows_import(root):
+        return f"{verb} {root!r} is disabled in Tool Configuration"
+    missing = packages.import_error(root, policy)
     if missing:
         return missing
-    verb = "import from" if from_import else "import of"
     return f"{verb} {root!r} is not allowed in run_python"
 
 
-def guard(tree: ast.Module) -> str | None:
-    """Return a violation message, or ``None`` if the code is allowed in safe mode.
+def guard(tree: ast.Module, policy: object | None = None) -> str | None:
+    """Return a violation message, or ``None`` if the code is allowed.
 
-    This is a cooperative guard, not an OS-level security boundary: it rejects
-    the obvious escape vectors (subprocess, network, dynamic execution, raw
-    command calls) so the agent stays on the structured, workspace-confined
+    ``policy`` narrows the default safe-mode allowlist from Tool Configuration.
+    This remains a cooperative guard, not an OS-level security boundary: it
+    rejects the obvious escape vectors (subprocess, network, dynamic execution,
+    raw command calls) so the agent stays on the structured, workspace-confined
     path. Dangerous mode bypasses this entirely. A hostile process cannot be
     contained by in-process ``exec``; that requires OS isolation.
     """
-    permitted = allowed_imports()
+    permitted = allowed_imports(policy)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.split(".")[0] not in permitted:
-                    return _reject(alias.name)
+                    return _reject(alias.name, policy=policy)
         elif isinstance(node, ast.ImportFrom):
             if node.module is not None and node.module.split(".")[0] not in permitted:
-                return _reject(node.module, from_import=True)
+                return _reject(node.module, from_import=True, policy=policy)
         elif isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Name) and func.id in BLOCKED_CALLS:

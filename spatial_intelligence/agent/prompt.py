@@ -10,6 +10,7 @@ missing scripting RPC, the Sentinel-1 layout, the absent ``osgeo`` bindings).
 from __future__ import annotations
 
 from ..pythonruntime import packages
+from ..pythonruntime.policy import PythonPolicy
 
 SYSTEM_PROMPT = """You are GeoAI, a geospatial-analysis agent in a Geo-AI web workspace.
 You control a live GeoLibre map (visible to the user) and a workspace folder.
@@ -120,12 +121,40 @@ Runtime environment:
   with numpy for band math while it is off."""
 
 
-def system_prompt() -> str:
-    """Return the system prompt plus what this machine's sandbox can import.
+def system_prompt(
+    policy: PythonPolicy | None = None,
+    disabled_tools: tuple[str, ...] | list[str] = (),
+) -> str:
+    """Return the system prompt plus this session's explicit restrictions.
 
     The optional-package lines are generated per agent build and are empty when
-    nothing extra is installed, so a lean install pays nothing for a capability
-    it does not have.
+    nothing extra is installed or all of it is disabled, so a lean install pays
+    nothing for a capability it does not have. Disabled imports, helper methods,
+    and tools get one terse note each: the model should not waste a call
+    rediscovering a restriction the user chose.
     """
-    block = packages.prompt_block()
+    block = packages.prompt_block(policy)
+    notes: list[str] = []
+    if policy is not None:
+        disabled_packages = sorted(policy.disabled_packages)
+        disabled_methods = sorted(policy.disabled_methods)
+        if disabled_packages or disabled_methods:
+            parts = []
+            if disabled_packages:
+                parts.append("imports " + ", ".join(disabled_packages))
+            if disabled_methods:
+                parts.append("helpers " + ", ".join(disabled_methods))
+            notes.append(
+                "Runtime note: Tool Configuration disabled "
+                + "; ".join(parts)
+                + " in run_python. Do not try them; re-enable them in Tool Configuration."
+            )
+    if disabled_tools:
+        notes.append(
+            "Tool note: Tool Configuration disabled these tools: "
+            + ", ".join(sorted(disabled_tools))
+            + ". Do not call them; use an enabled alternative or ask the user to "
+            "re-enable them in Tool Configuration."
+        )
+    block = "\n".join(part for part in (block, *notes) if part)
     return f"{SYSTEM_PROMPT}\n{block}\n" if block else SYSTEM_PROMPT

@@ -19,8 +19,10 @@ from ..agent.vision import VisionService
 from ..ai.manager import MANAGER_SERVICE
 from ..contracts.errors import RuntimeNotBoundError
 from ..contracts.services import CAPTURE_SERVICE, MAP_BRIDGE_SERVICE, VISION_SERVICE
+from ..pythonruntime.policy import PythonPolicy
 from ..settings.env import server_base_url
 from ..tools.build import default_registry
+from ..tools.config import apply_tool_config, normalize_tool_config
 from ..tools.packs.vision import VisionPack
 from ..tools.registry import ToolRegistry
 from ..tools.runtime import RuntimeEvents, ToolRuntime
@@ -84,6 +86,7 @@ class SessionServices:
         settings: Callable[[], dict],
         files_provider: Callable[[], list[str]],
         map_state: Callable[[], dict],
+        tool_config: Callable[[], dict] | None = None,
         bump_map: Callable[[], int] | None = None,
         trace_length: Callable[[str], int] | None = None,
         base_url: str | None = None,
@@ -96,6 +99,7 @@ class SessionServices:
         self._settings = settings
         self._files_provider = files_provider
         self._map_state = map_state
+        self._tool_config = tool_config or (lambda: {})
         self._bump_map = bump_map or (lambda: 0)
         self._trace_length = trace_length
         self._base_url = base_url or server_base_url()
@@ -146,6 +150,7 @@ class SessionServices:
             # A workspace switch rebinds; drop the old models, registry, and
             # agent first so nothing from the previous workspace survives.
             self.unbind()
+        config = normalize_tool_config(self._tool_config())
         runtime = ToolRuntime(
             workspace=workspace,
             map=map_obj,
@@ -161,6 +166,8 @@ class SessionServices:
             max_read_bytes=read_limit_bytes(
                 int(self._settings().get("context_window", 0) or 0) or DEFAULT_CONTEXT_WINDOW
             ),
+            tool_config=config,
+            python_policy=PythonPolicy.from_config(config),
         )
         if self._vision is not None:
             runtime.services[VISION_SERVICE] = self._vision
@@ -169,6 +176,7 @@ class SessionServices:
         if self._map_bridge is not None:
             runtime.services[MAP_BRIDGE_SERVICE] = self._map_bridge
         registry = default_registry(runtime)
+        apply_tool_config(registry, config)
         # The capability pack reads the registry back out of the service bag, so
         # discovery can annotate the capabilities it advertises with each tool's
         # registry summary without a second source of truth.
@@ -196,14 +204,29 @@ class SessionServices:
         self._runtime = None
         self._built = None
 
+    def rebind(self) -> None:
+        """Rebuild the registry, runtime, and agent for the open workspace.
+
+        Tool Configuration changed: a filtered registry and a runtime carrying
+        the new run_python policy are both needed. Reusing the workspace and
+        map avoids disturbing the open notebook, the map iframe, or the files.
+        """
+        runtime = self._runtime
+        if runtime is not None:
+            self.bind(runtime.workspace, runtime.map)
+
     def rebuild_agent(self) -> None:
         """(Re)build the agent from the current settings and registry."""
-        if self._registry is None:
+        if self._registry is None or self._runtime is None:
             return
+        config = normalize_tool_config(self._tool_config())
+        absent = [name for name in config["disabled_tools"] if name not in self._registry]
         self._built = build_agent(
             self._registry,
             lambda: self._settings().get("model", ""),
             context_window=int(self._settings().get("context_window", 0) or 0),
+            python_policy=self._runtime.python_policy,
+            disabled_tools=absent,
         )
 
     def sync_vision(self) -> None:
@@ -211,11 +234,16 @@ class SessionServices:
 
         The registry is authoritative for discovery too, so adding the pack here
         is the only step needed to make ``analyze_image`` visible and callable.
+        Tool Configuration can disable the tool independently of the model, so
+        it wins over the probe.
         """
         registry = self._registry
         if registry is None or self._runtime is None:
             return
+        config = normalize_tool_config(self._tool_config())
         available = bool(self._vision is not None and self._vision.supported)
+        if "analyze_image" in config["disabled_tools"]:
+            available = False
         registered = "analyze_image" in registry
         if available == registered:
             return

@@ -73,6 +73,8 @@ class StateRouteTests(ServerTestCase):
                 "map_revision",
                 "running_cell",
                 "settings",
+                "tool_config",
+                "tool_config_source",
                 "vision",
                 "workspaces",
             ],
@@ -395,7 +397,12 @@ class FileRouteTests(ServerTestCase):
     def test_harness_files_cannot_be_deleted_or_renamed(self):
         self.open_workspace()
 
-        for path in ("notebook.ipynb", "workspace.json", "maps/current.geolibre.json"):
+        for path in (
+            "notebook.ipynb",
+            "workspace.json",
+            "tools.json",
+            "maps/current.geolibre.json",
+        ):
             with self.subTest(path=path):
                 deleted = self.client.post("/api/files/delete", json={"path": path})
                 renamed = self.client.post(

@@ -27,6 +27,7 @@ import xarray
 
 
 from . import packages
+from .policy import PythonPolicy
 
 #: Cap on a returned docstring.
 MAX_DOC = 4000
@@ -57,13 +58,39 @@ ROOTS = {
 }
 
 
-def roots() -> dict:
-    """Return the core namespace plus whatever optional packages are installed.
+#: Alias -> import root, for filtering with the runtime policy.
+_ROOT_PACKAGES = {
+    "rasterio": "rasterio",
+    "rioxarray": "rioxarray",
+    "numpy": "numpy",
+    "np": "numpy",
+    "pandas": "pandas",
+    "pd": "pandas",
+    "geopandas": "geopandas",
+    "gpd": "geopandas",
+    "xarray": "xarray",
+    "xr": "xarray",
+    "skimage": "skimage",
+    "scipy": "scipy",
+    "rio_cogeo": "rio_cogeo",
+    "shapely": "shapely",
+    "pyproj": "pyproj",
+    "json": "json",
+}
+
+
+def roots(policy: PythonPolicy | None = None) -> dict:
+    """Return the core namespace plus installed, enabled optional packages.
 
     Called per lookup rather than built at import: importing torch to answer a
     question about ``rasterio`` would cost seconds on every app start.
     """
-    return {**ROOTS, **packages.bindings()}
+    core = {
+        name: module
+        for name, module in ROOTS.items()
+        if policy is None or policy.allows_import(_ROOT_PACKAGES[name])
+    }
+    return {**core, **packages.bindings(policy)}
 
 #: The workspace facade ``run_python`` binds, described as its own "symbol".
 VISION_DOC = (
@@ -89,6 +116,14 @@ WS_DOC = (
     "  ws.list_files(subdir='', pattern='*') -> list[str]\n"
     "  ws.data / ws.results / ws.maps -> str  (absolute directory paths)\n"
     "Prefer the structured tools (read_file/write_file) over ws for file I/O."
+)
+
+MODELS_DOC = (
+    "Read-only view of the local model cache, bound in run_python as models.\n"
+    "  models.dir(repo='') -> str   cache root, or one repository directory\n"
+    "  models.path(repo, filename='') -> str   absolute path; raises when missing\n"
+    "  models.list(repo='') -> list[str]   cached repositories or one repo's files\n"
+    "Weights arrive through ai_fetch_model; the sandbox itself has no network."
 )
 
 
@@ -175,27 +210,46 @@ def _describe(name: str, obj) -> dict:
     return result
 
 
-def describe(name: str = "") -> dict:
+def describe(name: str = "", policy: PythonPolicy | None = None) -> dict:
     """Return kind, signature, docstring, and members for a sandbox symbol.
 
     Pass a dotted name reachable from the ``run_python`` namespace, e.g.
     ``"rasterio.warp.reproject"``, ``"rasterio.control.GroundControlPoint"``,
     ``"rasterio.warp.Resampling"``, ``"numpy.ndarray"``, or ``"ws"``. With no
-    argument it lists the available top-level roots.
+    argument it lists the available top-level roots. ``policy`` hides imports
+    and helper methods disabled in Tool Configuration.
     """
     name = (name or "").strip()
-    available = roots()
+    available = roots(policy)
+    helpers: list[str] = []
+    if policy is None or policy.any_method("ws."):
+        helpers.append("ws")
+    if policy is None or policy.any_method("vision."):
+        helpers.append("vision")
+    if policy is None or policy.any_method("models."):
+        helpers.append("models")
     if not name:
         return {
             "kind": "namespace",
-            "roots": sorted(available) + ["vision", "ws"],
+            "roots": sorted(available) + helpers,
             "doc": "Top-level run_python names. Query a dotted path for details.",
         }
 
-    if name == "ws" or name.startswith("ws."):
-        return {"name": name, "kind": "workspace helper", "doc": WS_DOC}
-    if name == "vision" or name.startswith("vision."):
-        return {"name": name, "kind": "image helper", "doc": VISION_DOC}
+    helper_docs = {"ws": WS_DOC, "vision": VISION_DOC, "models": MODELS_DOC}
+    helper_kind = {
+        "ws": "workspace helper",
+        "vision": "image helper",
+        "models": "model cache helper",
+    }
+    for helper, doc in helper_docs.items():
+        if name == helper or name.startswith(helper + "."):
+            if helper not in helpers:
+                return {
+                    "name": name,
+                    "kind": "error",
+                    "doc": f"{helper} is disabled in Tool Configuration",
+                }
+            return {"name": name, "kind": helper_kind[helper], "doc": doc}
 
     parts = name.split(".")
     root = parts[0]
@@ -203,7 +257,7 @@ def describe(name: str = "") -> dict:
         return {
             "name": name,
             "kind": "error",
-            "doc": f"unknown root {root!r}; available: {sorted(available)}",
+            "doc": f"unknown root {root!r}; available: {sorted(available) + helpers}",
         }
 
     obj = available[root]
@@ -220,6 +274,7 @@ __all__ = [
     "MAX_DOC",
     "MAX_MEMBERS",
     "MAX_REPR",
+    "MODELS_DOC",
     "ROOTS",
     "VISION_DOC",
     "WS_DOC",

@@ -113,15 +113,20 @@ def version(package: SandboxPackage) -> str:
         return ""
 
 
-def import_error(root: str) -> str | None:
+def import_error(root: str, policy: object | None = None) -> str | None:
     """Return the message for importing ``root`` when it is a missing extra.
 
     A known optional package that is not installed deserves better than "not
     allowed": the snippet would be legal here, so the answer is the install
-    command rather than a dead end.
+    command rather than a dead end. A package disabled in Tool Configuration
+    short-circuits before that: the user chose to remove it.
     """
     package = package_for(root)
-    if package is None or installed(package):
+    if package is None:
+        return None
+    if policy is not None and not policy.allows_import(root):
+        return f"{root!r} is disabled in Tool Configuration"
+    if installed(package):
         return None
     return (
         f"{package.import_name} is not installed on this machine; install it with "
@@ -129,14 +134,17 @@ def import_error(root: str) -> str | None:
     )
 
 
-def bindings() -> dict:
-    """Return ``{name: module}`` for every installed optional package.
+def bindings(policy: object | None = None) -> dict:
+    """Return ``{name: module}`` for every installed, enabled optional package.
 
     Imported lazily and individually: a package that fails to import is skipped
-    rather than taking the whole sandbox namespace down with it.
+    rather than taking the whole sandbox namespace down with it. A package
+    disabled in Tool Configuration is not imported at all.
     """
     bound: dict = {}
     for package in installed_packages():
+        if policy is not None and not policy.allows_import(package.import_name):
+            continue
         try:
             module = __import__(package.import_name)
         except Exception:  # noqa: BLE001 - a broken optional install is ignored
@@ -145,13 +153,18 @@ def bindings() -> dict:
     return bound
 
 
-def prompt_block() -> str:
-    """Return the system-prompt lines for what is installed, or ``''``.
+def prompt_block(policy: object | None = None) -> str:
+    """Return the system-prompt lines for what is installed and enabled.
 
-    Empty when nothing is installed, so a lean install's prompt is byte-identical
-    to one that never heard of these packages.
+    Empty when nothing is installed (or everything optional is disabled), so a
+    lean install's prompt is byte-identical to one that never heard of these
+    packages.
     """
-    present = installed_packages()
+    present = tuple(
+        package
+        for package in installed_packages()
+        if policy is None or policy.allows_import(package.import_name)
+    )
     if not present:
         return ""
 

@@ -693,6 +693,26 @@ await scenario("api", async () => {
   );
 
   fetchCalls.length = 0;
+  await api.getToolConfig();
+  eq(
+    "api.get_tool_config",
+    [fetchCalls[0].url, fetchCalls[0].method],
+    ["/api/tools/config", "GET"]
+  );
+
+  fetchCalls.length = 0;
+  await api.saveToolConfig("workspace", { disabled_tools: ["buffer"] });
+  eq(
+    "api.save_tool_config",
+    [fetchCalls[0].url, fetchCalls[0].method, fetchCalls[0].body],
+    [
+      "/api/tools/config",
+      "PUT",
+      JSON.stringify({ scope: "workspace", config: { disabled_tools: ["buffer"] } }),
+    ]
+  );
+
+  fetchCalls.length = 0;
   await api.importUrl("https://example.com/a.tif");
   eq(
     "api.import_url",
@@ -840,6 +860,7 @@ if (gated) {
     const firstMap = app.querySelector("#map-panel");
     check("shell.first_render_regions", Boolean(firstMenubar && firstMap && app.querySelector("#side-panel")));
     check("shell.tab_content", Boolean(app.querySelector("#tab-content")));
+    check("shell.tool_config_button", Boolean(app.querySelector("#tool-config-button")));
     const toggle = app.querySelector("#follow-output");
     check("shell.follow_toggle_in_status_bar", Boolean(toggle && toggle.closest("#status-bar")));
 
@@ -862,6 +883,7 @@ if (gated) {
       "pages/map.js": ["mountMap", "syncMap"],
       "components/menubar.js": ["renderMenubar", "closeAllMenus"],
       "components/settings-dialog.js": ["openSettingsDialog"],
+      "components/tool-config-dialog.js": ["openToolConfigDialog"],
     };
     for (const [relative, names] of Object.entries(expected)) {
       const module = await import(webUrl(relative));
@@ -894,6 +916,257 @@ if (gated) {
     );
   });
 }
+
+await scenario("tool_config", async () => {
+  const store = await import(webUrl("store.js"));
+  const dom = await import(webUrl("dom.js"));
+  dom.closeDialog();
+  store.state.active_workspace = "demo";
+
+  const base = {
+    source: "global",
+    global: {
+      disabled_tools: [],
+      python: { disabled_packages: [], disabled_methods: [] },
+    },
+    workspace: null,
+    effective: {
+      disabled_tools: [],
+      python: { disabled_packages: [], disabled_methods: [] },
+    },
+    categories: [
+      {
+        id: "files",
+        label: "Workspace files",
+        description: "Workspace file tools.",
+        configurable_count: 1,
+        enabled_count: 1,
+        tools: [
+          {
+            name: "read_file",
+            summary: "Read a workspace file.",
+            category: "files",
+            origin: "builtin",
+            core: true,
+            required: true,
+            required_reason: "Every text input path starts here.",
+            configurable: false,
+            enabled: true,
+            available: true,
+            model_specific: false,
+          },
+          {
+            name: "download",
+            summary: "Download a URL.",
+            category: "files",
+            origin: "builtin",
+            core: false,
+            required: false,
+            required_reason: "",
+            configurable: true,
+            enabled: true,
+            available: true,
+            model_specific: false,
+          },
+        ],
+      },
+      {
+        id: "detection",
+        label: "Object detection",
+        description: "Known objects with a local model.",
+        configurable_count: 1,
+        enabled_count: 1,
+        tools: [
+          {
+            name: "detect_objects",
+            summary: "Detect known objects.",
+            category: "detection",
+            origin: "builtin",
+            core: false,
+            required: false,
+            required_reason: "",
+            configurable: true,
+            enabled: true,
+            available: true,
+            model_specific: true,
+          },
+        ],
+      },
+    ],
+    required_tools: { read_file: "Every text input path starts here." },
+    python: {
+      packages: [
+        {
+          name: "numpy",
+          group: "Data & rasters",
+          purpose: "arrays",
+          optional: false,
+          installed: true,
+          version: "",
+          enabled: true,
+        },
+      ],
+      package_groups: ["Data & rasters"],
+      methods: [
+        {
+          name: "ws.write_text",
+          group: "Workspace helper",
+          purpose: "write text",
+          enabled: true,
+        },
+      ],
+      method_groups: ["Workspace helper"],
+    },
+  };
+  let saved = null;
+  fetchResponder = (url, options = {}) => {
+    if (url !== "/api/tools/config") {
+      return { ok: true, status: 200, statusText: "OK", json: async () => ({}) };
+    }
+    const method = options.method || "GET";
+    if (method === "GET") {
+      const config = saved ? saved.config : base.global;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ ...base, effective: config }),
+      };
+    }
+    saved = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        ...base,
+        source: saved.scope,
+        global: saved.config,
+        workspace: saved.scope === "workspace" ? saved.config : null,
+        effective: saved.config,
+      }),
+    };
+  };
+
+  const toolConfig = await import(webUrl("components/tool-config-dialog.js"));
+  toolConfig.openToolConfigDialog();
+  await tick();
+  await tick();
+
+  let overlay = document.getElementById("overlay");
+  check("tool_config.dialog", Boolean(overlay && overlay.querySelector(".tool-config-dialog")));
+  const findRow = (name) =>
+    overlay.querySelectorAll(".tool-row").find((row) => row.textContent.includes(name));
+  const requiredRow = findRow("read_file");
+  check(
+    "tool_config.required_locked",
+    Boolean(requiredRow && requiredRow.querySelector("input").disabled)
+  );
+  const detectRow = findRow("detect_objects");
+  check(
+    "tool_config.configurable_enabled",
+    Boolean(detectRow && detectRow.querySelector("input").checked)
+  );
+
+  const tabs = overlay.querySelectorAll(".tool-config-tabs button");
+  tabs.find((button) => button.textContent.includes("Python")).click();
+  check(
+    "tool_config.python_tab",
+    Boolean(overlay.querySelector(".tool-config-body").textContent.includes("numpy"))
+  );
+  overlay
+    .querySelectorAll(".tool-config-tabs button")
+    .find((button) => button.textContent === "Tools")
+    .click();
+
+  const toggle = findRow("detect_objects").querySelector("input");
+  toggle.checked = false;
+  toggle.dispatch("change", { target: toggle });
+  check(
+    "tool_config.dirty_state",
+    overlay.querySelector(".dialog-status").textContent.includes("Unsaved")
+  );
+
+  fetchCalls.length = 0;
+  overlay.querySelector(".dialog-actions .primary").click();
+  await tick();
+  await tick();
+
+  const put = fetchCalls.find((call) => call.method === "PUT");
+  check("tool_config.saved_scope", put && JSON.parse(put.body).scope === "global");
+  check(
+    "tool_config.saved_tool",
+    put && JSON.parse(put.body).config.disabled_tools.includes("detect_objects")
+  );
+  check(
+    "tool_config.updated_store",
+    store.state.tool_config.disabled_tools.includes("detect_objects")
+  );
+  check("tool_config.closed_after_save", !document.getElementById("overlay"));
+
+  // Cancel must not persist anything: reopening asks the server again and the
+  // row is back to its saved state.
+  saved = null;
+  store.state.tool_config = null;
+  toolConfig.openToolConfigDialog();
+  await tick();
+  await tick();
+  overlay = document.getElementById("overlay");
+  const reopened = overlay
+    .querySelectorAll(".tool-row")
+    .find((row) => row.textContent.includes("detect_objects"));
+  check(
+    "tool_config.cancel_reverts",
+    Boolean(reopened && reopened.querySelector("input").checked)
+  );
+
+  overlay
+    .querySelectorAll(".scope-switch button")
+    .find((button) => button.textContent.includes("workspace"))
+    .click();
+  check(
+    "tool_config.workspace_scope_note",
+    overlay
+      .querySelector(".tool-config-scope-note")
+      .textContent.includes("Saving creates tools.json")
+  );
+  const detectionSection = overlay
+    .querySelectorAll(".tool-category")
+    .find((section) => section.textContent.includes("Object detection"));
+  const master = detectionSection.querySelector(".tool-category-toggle");
+  master.checked = false;
+  master.dispatch("change", { target: master });
+  const afterMaster = overlay
+    .querySelectorAll(".tool-row")
+    .find((row) => row.textContent.includes("detect_objects"));
+  check(
+    "tool_config.category_master",
+    Boolean(afterMaster && !afterMaster.querySelector("input").checked)
+  );
+
+  fetchCalls.length = 0;
+  overlay.querySelector(".dialog-actions .primary").click();
+  await tick();
+  await tick();
+  const workspacePut = fetchCalls.find((call) => call.method === "PUT");
+  check(
+    "tool_config.workspace_scope_saved",
+    workspacePut && JSON.parse(workspacePut.body).scope === "workspace"
+  );
+  check(
+    "tool_config.workspace_scope_tool",
+    workspacePut &&
+      JSON.parse(workspacePut.body).config.disabled_tools.includes("detect_objects")
+  );
+
+  store.state.active_workspace = null;
+  fetchResponder = () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({}),
+  });
+});
 
 await scenario("shortcut", async () => {
   const store = await import(webUrl("store.js"));
@@ -1300,6 +1573,9 @@ class FrontendCoreTests(unittest.TestCase):
 
     def test_cells(self) -> None:
         self.assert_group("cells.")
+
+    def test_tool_configuration_dialog(self) -> None:
+        self.assert_group("tool_config.")
 
     def test_run_shortcut(self) -> None:
         self.assert_group("shortcut.")

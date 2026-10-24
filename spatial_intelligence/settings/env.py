@@ -256,6 +256,8 @@ def server_base_url() -> str:
 FORBIDDEN_NAME_CHARS = frozenset('/\\:*?"<>|')
 #: Longest workspace name accepted.
 MAX_WORKSPACE_NAME = 64
+#: Filename the global Tool Configuration occupies in the workspaces root.
+RESERVED_WORKSPACE_NAMES = frozenset({"tools.json"})
 
 
 def validate_workspace_name(name: object) -> str:
@@ -274,6 +276,10 @@ def validate_workspace_name(name: object) -> str:
         )
     if text.startswith("."):
         raise ToolInputError("a workspace name cannot start with a dot")
+    if text.casefold() in RESERVED_WORKSPACE_NAMES:
+        raise ToolInputError(
+            "a workspace cannot be named tools.json; it is the global tool configuration"
+        )
     reserved = sorted({char for char in text if char in FORBIDDEN_NAME_CHARS})
     if reserved:
         raise ToolInputError(

@@ -35,6 +35,14 @@ export function updateSettings(patch) {
   return request("PUT", "/api/settings", patch);
 }
 
+export function getToolConfig() {
+  return request("GET", "/api/tools/config");
+}
+
+export function saveToolConfig(scope, config) {
+  return request("PUT", "/api/tools/config", { scope, config });
+}
+
 export function listWorkflows() {
   return request("GET", "/api/workflows");
 }

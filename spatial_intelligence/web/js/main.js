@@ -17,6 +17,7 @@ import { revealInteraction } from "./components/interaction.js";
 import { updateJobNode } from "./components/progress.js";
 import { refreshStatusBar, setConnection } from "./components/status-bar.js";
 import { openSettingsDialog } from "./components/settings-dialog.js";
+import { openToolConfigDialog } from "./components/tool-config-dialog.js";
 import { closeDialog, toast } from "./dom.js";
 import { applyTrace, flushPendingTrace, repaintTrace } from "./components/trace.js";
 import { connectEvents } from "./events.js";
@@ -43,6 +44,7 @@ export function boot() {
     onMap: handleMap,
     onFiles: handleFiles,
     onSettings: handleSettings,
+    onToolConfig: handleToolConfig,
     onVision: handleVision,
     onRunning: handleRunning,
     onMapCapture: handleMapCapture,
@@ -71,7 +73,8 @@ function handleShortcut(event) {
       .catch((error) => toast(error.message || String(error), "error"));
   } else if (event.key === ",") {
     event.preventDefault();
-    openSettingsDialog();
+    if (event.shiftKey) openToolConfigDialog();
+    else openSettingsDialog();
   } else if (event.key === "Enter") {
     event.preventDefault();
     if (event.shiftKey) {
@@ -275,6 +278,14 @@ function handleFiles(payload) {
 function handleSettings(payload) {
   if (!payload || !payload.settings) return;
   setState({ settings: payload.settings });
+}
+
+function handleToolConfig(payload) {
+  if (!payload || !payload.effective) return;
+  setState({
+    tool_config: payload.effective,
+    tool_config_source: payload.source || "global",
+  });
 }
 
 if (document.readyState === "loading") {

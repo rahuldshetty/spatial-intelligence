@@ -24,6 +24,15 @@ from ..map.bridge import reset_bridge
 from ..map import MAP_LOCK
 from ..settings import prefs
 from ..settings.env import DEFAULT_MODEL, list_workspaces, workspace_root
+from ..tools.catalog import catalog_payload
+from ..tools.config import normalize_tool_config, rejected_disables
+from ..tools.config_store import (
+    load_global_tool_config,
+    load_workspace_tool_config,
+    migrate_legacy_tool_configs,
+    save_global_tool_config,
+    save_workspace_tool_config,
+)
 from ..tools.runtime import ToolRuntime, bind
 from ..workflows import library
 from .bus import EventBus
@@ -48,6 +57,9 @@ class AppState:
     ) -> None:
         self.lock = threading.RLock()
         self._drone_cancels: dict[str, threading.Event] = {}
+        # Move tool policy out of settings.json/workspace.json before the
+        # session reads either file. Idempotent and a no-op on a new install.
+        migrate_legacy_tool_configs()
         self.settings = settings or prefs.load_settings()
         self.bus = EventBus()
         self.jobs = JobRegistry(self.bus)
@@ -65,6 +77,7 @@ class AppState:
             bus=self.bus,
             jobs=self.jobs,
             settings=lambda: self.settings,
+            tool_config=lambda: self.effective_tool_config(),
             files_provider=lambda: self.list_files(),
             map_state=self.workspaces.map_state,
             bump_map=self.workspaces.bump_map_revision,
@@ -85,6 +98,7 @@ class AppState:
         """Everything the browser needs to render the app from scratch."""
         with self.lock:
             map_state = self.workspaces.map_state()
+            effective, source = self._tool_config()
             return {
                 # The directory name, not the name as typed on open: the two
                 # differ on case-insensitive filesystems and the capture bridge
@@ -99,6 +113,8 @@ class AppState:
                 "jobs": self.jobs.snapshot(),
                 "running_cell": self.runs.active_id(),
                 "settings": dict(self.settings),
+                "tool_config": effective,
+                "tool_config_source": source,
                 "vision": self.vision.snapshot(),
             }
 
@@ -144,6 +160,82 @@ class AppState:
         self.bus.publish("vision", snapshot)
 
     # -- settings --------------------------------------------------------
+
+    def _tool_config(self) -> tuple[dict, str]:
+        """Return the effective configuration and where it came from.
+
+        A workspace override is authoritative while it exists; otherwise the
+        global configuration applies. This is read on every bind and snapshot,
+        so a workspace switch needs no cache invalidation.
+        """
+        global_config = load_global_tool_config()
+        workspace = self.workspaces.workspace
+        if workspace is not None:
+            stored = load_workspace_tool_config(workspace)
+            if stored is not None:
+                return stored, "workspace"
+        return global_config, "global"
+
+    def effective_tool_config(self) -> dict:
+        """Return the configuration the next agent build will use."""
+        return self._tool_config()[0]
+
+    def tool_config_payload(self) -> dict:
+        """Return both scopes, the effective config, and the UI catalog."""
+        with self.lock:
+            effective, source = self._tool_config()
+            global_config = load_global_tool_config()
+            workspace = self.workspaces.workspace
+            workspace_config = (
+                load_workspace_tool_config(workspace)
+                if workspace is not None
+                else None
+            )
+            vision_supported = bool(self.vision.supported)
+        return {
+            "source": source,
+            "global": global_config,
+            "workspace": workspace_config,
+            "effective": effective,
+            **catalog_payload(effective, vision_supported),
+        }
+
+    def update_tool_config(self, scope: str, config: dict) -> dict:
+        """Persist a Tool Configuration for ``scope`` and rebuild the session.
+
+        Required tools are rejected rather than silently ignored: the UI locks
+        them, so a request that disables one is a stale page or a hand-written
+        request, and the caller deserves the reason. A workspace save needs an
+        open workspace; a global save works with none.
+        """
+        if scope not in ("global", "workspace"):
+            raise ToolInputError(f"unknown tool configuration scope: {scope!r}")
+        normalized = normalize_tool_config(config)
+        locked = rejected_disables(normalized)
+        if locked:
+            names = ", ".join(locked)
+            raise ToolInputError(f"required tools cannot be disabled: {names}")
+        self.runs.wait_idle()
+        with self.lock:
+            before, before_source = self._tool_config()
+            if scope == "global":
+                save_global_tool_config(normalized)
+            else:
+                workspace = self.workspaces.workspace
+                if workspace is None:
+                    raise ToolInputError(
+                        "open a workspace before saving a workspace tool configuration"
+                    )
+                save_workspace_tool_config(workspace, normalized)
+            after, after_source = self._tool_config()
+            if (before, before_source) != (after, after_source) and self.services.bound:
+                self.services.rebind()
+            payload = self.tool_config_payload()
+        self.bus.publish(
+            "tool_config",
+            {"effective": payload["effective"], "source": payload["source"]},
+        )
+        return payload
 
     def update_settings(self, patch: dict) -> dict:
         """Merge ``patch`` into settings, persist, and rebuild the agent on change.

@@ -51,14 +51,24 @@ def step_from_event(event: object) -> dict[str, Any] | None:
         }
     if kind == "part_start":
         part = event.part
-        if getattr(part, "part_kind", None) in ("text", "thinking"):
+        part_kind = getattr(part, "part_kind", None)
+        if part_kind in ("text", "thinking"):
             content = getattr(part, "content", "") or ""
             if content:
-                return {"type": "text", "content": content}
+                step = {"type": "text", "content": content}
+                if part_kind == "thinking":
+                    # The UI renders both as text, but the conversation index
+                    # must not store model reasoning. Keep the distinction.
+                    step["reasoning"] = True
+                return step
     elif kind == "part_delta":
         delta = event.delta
-        if getattr(delta, "part_delta_kind", None) in ("text", "thinking"):
+        delta_kind = getattr(delta, "part_delta_kind", None)
+        if delta_kind in ("text", "thinking"):
             content = getattr(delta, "content_delta", "") or ""
             if content:
-                return {"type": "text_delta", "content": content}
+                step = {"type": "text_delta", "content": content}
+                if delta_kind == "thinking":
+                    step["reasoning"] = True
+                return step
     return None

@@ -32,6 +32,10 @@ REQUIRED_TOOL_REASONS: dict[str, str] = {
     "discover_capabilities": (
         "System-prompt rule 1: finds the right deferred tools for a broad request."
     ),
+    "search_conversation_history": (
+        "History rule: a follow-up may need earlier prompts and results, which only "
+        "this tool can retrieve."
+    ),
     "describe_tool": (
         "System-prompt rule 1: documents a discovered tool and makes it callable."
     ),
@@ -73,6 +77,7 @@ MODEL_SPECIFIC_TOOLS = frozenset({"analyze_image"})
 CATEGORY_LABELS: dict[str, str] = {
     "interaction": "Interaction",
     "capability": "Capability discovery",
+    "conversation": "Conversation history",
     "files": "Workspace files",
     "catalog": "Imagery catalogs",
     "layers": "Map & layers",
@@ -92,6 +97,7 @@ CATEGORY_LABELS: dict[str, str] = {
 CATEGORY_DESCRIPTIONS: dict[str, str] = {
     "interaction": "Structured questions that pause a run for user input.",
     "capability": "Discovery and documentation for deferred tools.",
+    "conversation": "Recall of earlier prompts, tool calls, and results in this workspace.",
     "files": "Workspace file listing, reading, writing, and downloads.",
     "catalog": "Vantor, OpenAerialMap, and STAC imagery search.",
     "layers": "Adding, styling, comparing, and inspecting map layers.",

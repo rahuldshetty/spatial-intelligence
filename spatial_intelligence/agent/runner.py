@@ -177,6 +177,10 @@ class RunnerHooks:
     augment_prompt: Callable[[str], str]
     trace_path: Callable[[str], Path | None]
     publish_trace: Callable[[str, dict], None]
+    conversation_begin: Callable[[str, str, str], None]
+    conversation_resume: Callable[[str, str, dict], None]
+    conversation_step: Callable[[str, dict, int], None]
+    conversation_result: Callable[[str, str, str | None, str | None], None]
     find_recorded_tool: Callable[[str], dict | None]
     record_tool_call: Callable[[str, dict], dict]
     record_tool_result: Callable[[dict, dict], None]
@@ -251,6 +255,10 @@ class PromptRunner:
                     conversation_id=resume.get("conversation_id"),
                     response=resume.get("answers") or {},
                 )
+        if resume is None:
+            hooks.conversation_begin(cell_id, run_id, source)
+        else:
+            hooks.conversation_resume(cell_id, run_id, resume.get("answers") or {})
 
         plan_store = hooks.plan_store()
         initial_plan_items = latest_plan_items(trace_steps) if resume else []
@@ -269,7 +277,9 @@ class PromptRunner:
             async for event in events:
                 step = step_from_event(event)
                 if step is not None:
-                    self._publish_step(cell_id, step, trace_steps, trace_path, recorded_tools)
+                    self._publish_step(
+                        cell_id, step, trace_steps, trace_path, recorded_tools
+                    )
                     if (
                         step.get("type") == "tool_result"
                         and step.get("outcome") == "success"
@@ -408,6 +418,7 @@ class PromptRunner:
             if trace_path is not None:
                 traces.append_step(trace_path, step)
             hooks.publish_trace(cell_id, step)
+            hooks.conversation_step(cell_id, step, len(trace_steps) - 1)
 
         if not hooks.settings().get("record_agent_steps", True):
             return
@@ -446,6 +457,7 @@ class PromptRunner:
                     usage=usage,
                     conversation_id=result.conversation_id,
                 )
+            hooks.conversation_result(cell_id, "waiting_for_input", None, None)
             return RunOutcome(
                 status="waiting_for_input",
                 interaction=interaction,
@@ -473,6 +485,7 @@ class PromptRunner:
             )
         if hooks.settings().get("record_agent_steps", True):
             hooks.record_agent_response(cell_id, str(result.output))
+        hooks.conversation_result(cell_id, "done", str(result.output), None)
         return RunOutcome(
             status="done",
             output=str(result.output),
@@ -492,6 +505,7 @@ class PromptRunner:
         path = self.hooks.trace_path(cell_id)
         if path is not None:
             traces.append_result(path, status=status, output=output, error=error)
+        self.hooks.conversation_result(cell_id, status, output, error)
 
 
 def resume_payload(*, messages, interaction: dict, answers: dict, conversation_id, call_id: str):

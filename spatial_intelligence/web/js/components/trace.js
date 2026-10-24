@@ -106,6 +106,65 @@ function toolStepNode(group) {
   return details;
 }
 
+function recallNode(step) {
+  const results = Array.isArray(step.results) ? step.results : [];
+  const terms = Array.isArray(step.terms) ? step.terms : [];
+  const details = el("details", {
+    class: "trace-step trace-recall",
+    "data-trace-key": "recall:" + (step.id || step.query || ""),
+  });
+  const summary = el("summary", {});
+  const mark = el("span", { class: "trace-icon" });
+  mark.append(icon("database", { size: 13 }));
+  const count = results.length + (results.length === 1 ? " hit" : " hits");
+  summary.append(
+    mark,
+    el("span", { class: "trace-name", text: "history recall" }),
+    el("span", {
+      class: "trace-preview",
+      text: (step.query || "") + " · " + count,
+    })
+  );
+  details.append(summary);
+
+  const body = el("div", { class: "trace-body recall-body" });
+  if (terms.length) {
+    const row = el("div", { class: "recall-terms" });
+    row.append(el("span", { class: "recall-terms-label", text: "Terms" }));
+    for (const term of terms) {
+      row.append(el("span", { class: "recall-term", text: term }));
+    }
+    body.append(row);
+  }
+  if (!results.length) {
+    body.append(el("div", { class: "recall-empty", text: "No earlier prompt matched." }));
+  } else {
+    const list = el("div", { class: "recall-hits" });
+    for (const hit of results) {
+      const item = el("div", { class: "recall-hit" });
+      const head = el("div", { class: "recall-hit-head" });
+      const kind = hit.tool_name ? hit.kind + " · " + hit.tool_name : hit.kind || "match";
+      head.append(el("span", { class: "recall-hit-kind", text: kind }));
+      const meta = [
+        hit.prompt_id ? "prompt " + hit.prompt_id : "",
+        hit.step_index != null ? "step " + hit.step_index : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      if (meta) head.append(el("span", { class: "recall-hit-meta", text: meta }));
+      item.append(head);
+      item.append(el("div", { class: "recall-hit-hint", text: hit.hint || "" }));
+      if (hit.prompt) {
+        item.append(el("div", { class: "recall-hit-prompt", text: "Prompt: " + hit.prompt }));
+      }
+      list.append(item);
+    }
+    body.append(list);
+  }
+  details.append(body);
+  return details;
+}
+
 function traceTextNode(content, cellId, index) {
   const node = el("div", { class: "trace-step trace-text markdown" });
   node.dataset.source = content || "";
@@ -193,6 +252,9 @@ export function groupTraceSteps(trace) {
     } else if (step.type === "usage") {
       flush();
       groups.push({ type: "usage", usage: step.usage, index });
+    } else if (step.type === "recall") {
+      flush();
+      groups.push({ type: "recall", step, index });
     } else {
       flush();
     }
@@ -252,6 +314,8 @@ function traceEntries(trace, cell) {
         else interactionRendered = true;
       }
       entries.push({ index: group.index, nodes });
+    } else if (group.type === "recall") {
+      entries.push({ index: group.index, nodes: [recallNode(group.step)] });
     }
   }
   const trailing = [];

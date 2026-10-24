@@ -40,6 +40,7 @@ class RuntimeEvents:
 
     files_changed: Callable[[], None] | None = None
     map_changed: Callable[[], None] | None = None
+    recall: Callable[[str | None, dict], None] | None = None
 
     def notify_files(self) -> None:
         """Tell the session the workspace file list may have changed."""
@@ -48,6 +49,12 @@ class RuntimeEvents:
     def notify_map(self) -> None:
         """Tell the session the live map project may have changed."""
         _notify(self.map_changed)
+
+    def notify_recall(self, run_id: str | None, payload: dict) -> None:
+        """Tell the session a history search ran, for the trace UI."""
+        if self.recall is None:
+            return
+        _notify(lambda: self.recall(run_id, payload))
 
 
 @dataclass(slots=True)

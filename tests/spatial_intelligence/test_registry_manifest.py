@@ -44,6 +44,7 @@ EXPECTED_CORE = frozenset(
         "read_file",
         "request_user_input",
         "run_python",
+        "search_conversation_history",
         "skill",
         "write_file",
     }
@@ -53,6 +54,7 @@ EXPECTED_CATEGORY_COUNTS = {
     "ai": 4,
     "capability": 2,
     "catalog": 9,
+    "conversation": 1,
     "detection": 1,
     "files": 6,
     "interaction": 1,
@@ -91,7 +93,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 105)
+        self.assertEqual(len(self.registry), 106)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -154,7 +156,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 97)
+        self.assertEqual(len(implemented), 98)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)

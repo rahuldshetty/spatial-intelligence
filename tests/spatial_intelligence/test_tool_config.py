@@ -70,6 +70,7 @@ class ConfigModelTests(unittest.TestCase):
             rejected_disables({"disabled_tools": ["run_python", "buffer"]}),
             ["run_python"],
         )
+        self.assertIn("search_conversation_history", REQUIRED_TOOL_REASONS)
         for name in REQUIRED_TOOL_REASONS:
             with self.subTest(name=name):
                 self.assertIn(name, rejected_disables({"disabled_tools": [name]}))
@@ -111,6 +112,8 @@ class ConfigModelTests(unittest.TestCase):
         self.assertTrue(rows["run_python"]["required"])
         self.assertTrue(rows["run_python"]["enabled"])
         self.assertTrue(rows["request_user_input"]["required"])
+        self.assertTrue(rows["search_conversation_history"]["required"])
+        self.assertFalse(rows["search_conversation_history"]["configurable"])
         self.assertFalse(rows["run_python"]["configurable"])
         self.assertTrue(rows["detect_objects"]["model_specific"])
         self.assertTrue(rows["detect_objects"]["configurable"])

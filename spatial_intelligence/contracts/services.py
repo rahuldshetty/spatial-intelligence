@@ -9,4 +9,12 @@ CAPTURE_SERVICE = "map.capture"
 #: One-shot map queries (currently the user's drawn sketches).
 MAP_BRIDGE_SERVICE = "map.bridge"
 
-__all__ = ["CAPTURE_SERVICE", "MAP_BRIDGE_SERVICE", "VISION_SERVICE"]
+#: The open workspace's searchable conversation index.
+CONVERSATION_SERVICE = "conversation.store"
+
+__all__ = [
+    "CAPTURE_SERVICE",
+    "CONVERSATION_SERVICE",
+    "MAP_BRIDGE_SERVICE",
+    "VISION_SERVICE",
+]

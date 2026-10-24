@@ -76,10 +76,10 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         id="map.vision",
-        title="Look at the map or an image",
+        title="Analyze the map or an image",
         summary=(
-            "Send the current GeoLibre viewport or a workspace image/GeoTIFF to "
-            "a vision-capable model and answer a question about it."
+            "Ask a vision-capable model a question about the current GeoLibre "
+            "viewport or a workspace image/GeoTIFF and return its text answer."
         ),
         keywords=(
             "image", "screenshot", "screen", "see", "look", "visual", "vision",

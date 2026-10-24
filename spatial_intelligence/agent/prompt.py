@@ -10,6 +10,7 @@ missing scripting RPC, the Sentinel-1 layout, the absent ``osgeo`` bindings).
 from __future__ import annotations
 
 from ..pythonruntime import packages
+from ..pythonruntime.policy import PythonPolicy
 
 SYSTEM_PROMPT = """You are GeoAI, a geospatial-analysis agent in a Geo-AI web workspace.
 You control a live GeoLibre map (visible to the user) and a workspace folder.
@@ -78,23 +79,21 @@ Rules:
     each feature's bbox/center and saves results/drawn_aoi.geojson for clipping,
     buffering, gridding, or tiling. The embedded bridge has no scripting RPC, so
     zoom_to_layer, identify, and fly_to are unavailable.
-    When the user asks what the map looks like, or to draw around something
-    visible, call analyze_image: it captures the current viewport only (no UI,
-    legend, or scale bar) and sends it to the model. It exists only when the
-    configured model accepts images; run_python exposes the same capability as
-    vision.ask(question, image="map"|"path"). For box/JSON answers from a
-    reasoning model, use vision.ask (thinking is off by default); a reasoning
-    model can otherwise spend its whole output budget on reasoning and return
-    no answer. For dense tiled detection, ask for normalized 0–1 boxes (pixel
-    coordinates may refer to a resized image), cap boxes per tile (about 25–40)
-    so JSON is not truncated, and use the tile's own `ul_e`/`ul_n` plus
-    resolution to georeference. `px_x`/`px_y` are scene pixel offsets, not a
-    geotransform; never add them to tile-local normalized coordinates. Assign
-    each detection to one tile by its core, dedupe overlaps, and QA the overlay
-    before reporting counts. When a NIR band is available, reject boxes whose
-    interior is mostly vegetation (high NDVI) and implausibly large boxes that
-    span parking or roads; the boxes are axis-aligned detections, not building
-    footprints.
+    When the user asks what the map looks like, or you need a visual check,
+    call analyze_image: it captures the current viewport only (no UI, legend,
+    or scale bar) and asks the configured vision model, returning its text
+    answer. It exists only when the configured model accepts images; run_python
+    exposes the same implementation as vision.ask(question, image="map"|"path");
+    vision.ask adds a thinking switch, off by default. For box/JSON answers,
+    ask for normalized 0–1 boxes (pixel coordinates may refer to a resized
+    image), cap boxes per tile (about 25–40) so JSON is not truncated, and use
+    the tile's own `ul_e`/`ul_n` plus resolution to georeference. `px_x`/`px_y`
+    are scene pixel offsets, not a geotransform; never add them to tile-local
+    normalized coordinates. Assign each detection to one tile by its core, dedupe overlaps,
+    and QA the overlay before reporting counts. When a NIR band is available,
+    reject boxes whose interior is mostly vegetation (high NDVI) and
+    implausibly large boxes that span parking or roads; the boxes are
+    axis-aligned detections, not building footprints.
 11. Use web_search for documentation, provider terms, or current facts no dataset
     tool covers; treat results as leads and download a promising URL to verify.
 12. Report concisely what you did and where outputs live (relative paths).
@@ -122,12 +121,40 @@ Runtime environment:
   with numpy for band math while it is off."""
 
 
-def system_prompt() -> str:
-    """Return the system prompt plus what this machine's sandbox can import.
+def system_prompt(
+    policy: PythonPolicy | None = None,
+    disabled_tools: tuple[str, ...] | list[str] = (),
+) -> str:
+    """Return the system prompt plus this session's explicit restrictions.
 
     The optional-package lines are generated per agent build and are empty when
-    nothing extra is installed, so a lean install pays nothing for a capability
-    it does not have.
+    nothing extra is installed or all of it is disabled, so a lean install pays
+    nothing for a capability it does not have. Disabled imports, helper methods,
+    and tools get one terse note each: the model should not waste a call
+    rediscovering a restriction the user chose.
     """
-    block = packages.prompt_block()
+    block = packages.prompt_block(policy)
+    notes: list[str] = []
+    if policy is not None:
+        disabled_packages = sorted(policy.disabled_packages)
+        disabled_methods = sorted(policy.disabled_methods)
+        if disabled_packages or disabled_methods:
+            parts = []
+            if disabled_packages:
+                parts.append("imports " + ", ".join(disabled_packages))
+            if disabled_methods:
+                parts.append("helpers " + ", ".join(disabled_methods))
+            notes.append(
+                "Runtime note: Tool Configuration disabled "
+                + "; ".join(parts)
+                + " in run_python. Do not try them; re-enable them in Tool Configuration."
+            )
+    if disabled_tools:
+        notes.append(
+            "Tool note: Tool Configuration disabled these tools: "
+            + ", ".join(sorted(disabled_tools))
+            + ". Do not call them; use an enabled alternative or ask the user to "
+            "re-enable them in Tool Configuration."
+        )
+    block = "\n".join(part for part in (block, *notes) if part)
     return f"{SYSTEM_PROMPT}\n{block}\n" if block else SYSTEM_PROMPT

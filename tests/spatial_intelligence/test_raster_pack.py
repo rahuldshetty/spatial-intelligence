@@ -721,6 +721,34 @@ class RasterAnalysisTests(RasterTestCase):
 
         self.assertIsNone(raster.looks_cog(junk))
 
+    def test_a_large_tiled_raster_without_overviews_is_not_cog(self):
+        path = self.workspace.resolve("data/tiled-no-overviews.tif", write=True)
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            width=1200,
+            height=1200,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=from_origin(0.0, 1.0, 0.001, 0.001),
+            tiled=True,
+            blockxsize=512,
+            blockysize=512,
+        ) as ds:
+            ds.write(np.zeros((1, 1200, 1200), dtype="uint8"))
+
+        self.assertFalse(raster.looks_cog(path))
+
+        converted, changed = raster.to_cog_if_needed(
+            self.workspace, "data/tiled-no-overviews.tif"
+        )
+        self.assertTrue(changed)
+        with rasterio.open(converted) as ds:
+            self.assertTrue(ds.overviews(1))
+        self.assertTrue(raster.looks_cog(converted))
+
     def test_every_submodule_imports_and_the_registry_builds(self):
         """A fresh interpreter imports every module and assembles the tool registry,
         so an import-time mistake anywhere is caught without the whole suite."""

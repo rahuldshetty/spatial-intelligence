@@ -41,7 +41,14 @@ COPY spatial_intelligence/ spatial_intelligence/
 COPY app.py ./
 
 RUN uv venv --python 3.12 /opt/venv \
-    && uv pip install --python /opt/venv/bin/python . pyinstaller
+    && uv pip install --python /opt/venv/bin/python . pyinstaller \
+    && OPENCV_VERSION=$(/opt/venv/bin/python -c "import importlib.metadata as m; print(m.version('opencv-python'))") \
+    && uv pip uninstall --python /opt/venv/bin/python opencv-python \
+    && uv pip install --python /opt/venv/bin/python "opencv-python-headless==${OPENCV_VERSION}"
+
+# Orthority requires the GUI OpenCV wheel; the AppImage must not, because it
+# needs libGL/X11. Exactly one cv2 provider may remain in the bundle.
+RUN /opt/venv/bin/python -c "import importlib.metadata as m; names = {d.metadata['Name'].lower() for d in m.distributions()}; assert 'opencv-python' not in names, 'GUI OpenCV wheel installed'; assert 'opencv-python-headless' in names, 'headless OpenCV missing'"
 
 ENV PATH=/opt/venv/bin:$PATH
 
@@ -65,11 +72,14 @@ RUN pyinstaller packaging/spatial-intelligence.spec \
 # lookup) and to usr/share/applications (freedesktop convention).
 RUN mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications \
         AppDir/usr/share/icons/hicolor/128x128/apps \
+        AppDir/usr/share/doc/spatial-intelligence/licenses \
     && cp -r dist/spatial-intelligence AppDir/usr/lib/spatial-intelligence \
     && cp packaging/spatial-intelligence.desktop AppDir/spatial-intelligence.desktop \
     && cp packaging/spatial-intelligence.desktop AppDir/usr/share/applications/spatial-intelligence.desktop \
     && cp packaging/icon.png AppDir/spatial-intelligence.png \
     && cp packaging/icon.png AppDir/usr/share/icons/hicolor/128x128/apps/spatial-intelligence.png \
+    && cp packaging/THIRD_PARTY_NOTICES.md AppDir/usr/share/doc/spatial-intelligence/ \
+    && cp packaging/licenses/ORTHORITY-AGPL-3.0-or-later.txt AppDir/usr/share/doc/spatial-intelligence/licenses/ \
     && ln -s spatial-intelligence.png AppDir/.DirIcon
 
 COPY packaging/spatial-intelligence.sh AppDir/usr/bin/spatial-intelligence

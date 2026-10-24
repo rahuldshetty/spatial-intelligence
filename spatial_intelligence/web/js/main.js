@@ -9,6 +9,7 @@ import {
   saveWorkspace,
   sendMapBridge,
   sendMapCapture,
+  updateCell,
 } from "./api.js";
 import { bridgeRequest } from "./bridge.js";
 import { closeAllMenus } from "./components/menubar.js";
@@ -16,6 +17,7 @@ import { revealInteraction } from "./components/interaction.js";
 import { updateJobNode } from "./components/progress.js";
 import { refreshStatusBar, setConnection } from "./components/status-bar.js";
 import { openSettingsDialog } from "./components/settings-dialog.js";
+import { openToolConfigDialog } from "./components/tool-config-dialog.js";
 import { closeDialog, toast } from "./dom.js";
 import { applyTrace, flushPendingTrace, repaintTrace } from "./components/trace.js";
 import { connectEvents } from "./events.js";
@@ -42,6 +44,7 @@ export function boot() {
     onMap: handleMap,
     onFiles: handleFiles,
     onSettings: handleSettings,
+    onToolConfig: handleToolConfig,
     onVision: handleVision,
     onRunning: handleRunning,
     onMapCapture: handleMapCapture,
@@ -70,23 +73,53 @@ function handleShortcut(event) {
       .catch((error) => toast(error.message || String(error), "error"));
   } else if (event.key === ",") {
     event.preventDefault();
-    openSettingsDialog();
+    if (event.shiftKey) openToolConfigDialog();
+    else openSettingsDialog();
   } else if (event.key === "Enter") {
     event.preventDefault();
     if (event.shiftKey) {
-      runAll()
+      persistFocusedCell()
+        .then(() => runAll())
         .then(jump)
         .catch((error) => toast(error.message || String(error), "error"));
       return;
     }
-    const cell = document.activeElement && document.activeElement.closest(".cell");
-    const cellId = cell && cell.getAttribute("data-cell-id");
-    if (cellId) {
-      runCell(cellId)
-        .then(jump)
-        .catch((error) => toast(error.message || String(error), "error"));
-    }
+    runFocusedCell().catch((error) => toast(error.message || String(error), "error"));
   }
+}
+
+/**
+ * Save the focused cell textarea before a keyboard run.
+ *
+ * The editor updates local state on every input, but the server only receives
+ * the source on blur. Ctrl+Enter does not blur, so the run used to start with
+ * the previous source — often an empty prompt — and the rerender wiped what
+ * was typed. Await the update so the queued run reads the same text.
+ */
+async function persistFocusedCell() {
+  const active = document.activeElement;
+  const cell =
+    active && typeof active.closest === "function" ? active.closest(".cell") : null;
+  const cellId = cell && cell.getAttribute("data-cell-id");
+  if (!cellId) return null;
+  if (
+    active &&
+    active.tagName === "TEXTAREA" &&
+    !active.readOnly &&
+    typeof active.value === "string"
+  ) {
+    const index = state.cells.findIndex((item) => item.id === cellId);
+    if (index >= 0) state.cells[index].source = active.value;
+    await updateCell(cellId, active.value);
+  }
+  return cellId;
+}
+
+function runFocusedCell() {
+  return persistFocusedCell().then((cellId) => {
+    if (!cellId) return null;
+    return runCell(cellId).then(() => jump());
+  });
 }
 
 async function loadState() {
@@ -144,17 +177,23 @@ function handleRunning(data) {
 /** Map queries the app is allowed to answer for the server. */
 const MAP_QUERY_METHODS = new Set(["getDrawnFeatures"]);
 
+/**
+ * Whether this tab owns the workspace a map request was sent for.
+ *
+ * Capture and query requests are broadcast over SSE to every open tab. A tab
+ * on another workspace must stay silent: answering with an error resolves the
+ * server's pending request and poisons it for the tab that can actually
+ * answer. The server times out with a useful message if no tab owns it.
+ */
+function ownsMapWorkspace(workspace) {
+  return !workspace || workspace === state.active_workspace;
+}
+
 /** Answer a server JSON map query with the live map's data. */
 async function handleMapBridge(data) {
   if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  if (!ownsMapWorkspace(data.workspace)) return;
   try {
-    if (
-      data.workspace &&
-      state.active_workspace &&
-      data.workspace !== state.active_workspace
-    ) {
-      throw new Error("The workspace changed before the map query ran.");
-    }
     if (!MAP_QUERY_METHODS.has(data.method)) {
       throw new Error("Unsupported map query: " + String(data.method));
     }
@@ -173,14 +212,8 @@ async function handleMapBridge(data) {
 /** Answer a server capture request with the current map canvas. */
 async function handleMapCapture(data) {
   if (!data || typeof data.id !== "string" || typeof data.token !== "string") return;
+  if (!ownsMapWorkspace(data.workspace)) return;
   try {
-    if (
-      data.workspace &&
-      state.active_workspace &&
-      data.workspace !== state.active_workspace
-    ) {
-      throw new Error("The workspace changed before the map was captured.");
-    }
     const [image, view] = await Promise.all([
       bridgeRequest("toImage", {}),
       bridgeRequest("getView", {}),
@@ -222,6 +255,16 @@ function handleJobs(payload) {
 
 function handleMap(payload) {
   if (!payload) return;
+  if (payload.workspace != null && payload.workspace !== state.active_workspace) {
+    return;
+  }
+  if (payload.revision != null) {
+    const revision = Number(payload.revision);
+    if (Number.isFinite(revision) && revision < (Number(state.map_revision) || 0)) {
+      return;
+    }
+    state.map_revision = revision;
+  }
   state.map_project = payload.project != null ? payload.project : null;
   syncMap();
 }
@@ -235,6 +278,14 @@ function handleFiles(payload) {
 function handleSettings(payload) {
   if (!payload || !payload.settings) return;
   setState({ settings: payload.settings });
+}
+
+function handleToolConfig(payload) {
+  if (!payload || !payload.effective) return;
+  setState({
+    tool_config: payload.effective,
+    tool_config_source: payload.source || "global",
+  });
 }
 
 if (document.readyState === "loading") {

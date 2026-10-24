@@ -44,13 +44,13 @@ import shapely
 import skimage
 import xarray
 
-from ..agent.imaging import encode_capture, load_image
+from ..agent.image_analysis import analyze_image_source
 from ..ai.store import models_dir
-from ..contracts.errors import ToolInputError
-from ..contracts.services import CAPTURE_SERVICE, VISION_SERVICE
+from ..contracts.services import VISION_SERVICE
 from ..workspace import Workspace
 from . import packages
 from .output import OutputStore
+from .policy import PythonPolicy
 from .sandbox import guard
 
 #: Wall-clock cap on one snippet. The snippet runs on a daemon thread, so an
@@ -63,21 +63,31 @@ TIMEOUT = 300.0
 _CWD_LOCK = threading.Lock()
 
 
+def _method_enabled(policy: PythonPolicy | None, name: str) -> None:
+    """Raise when Tool Configuration disabled one facade method."""
+    if policy is not None and not policy.allows_method(name):
+        raise AttributeError(f"{name} is disabled in Tool Configuration")
+
+
 class _ConfinedWorkspace:
     """Path-confined facade over the active workspace (no raw ``Path``/map)."""
 
-    def __init__(self, ws: Workspace):
+    def __init__(self, ws: Workspace, policy: PythonPolicy | None = None):
         self._ws = ws
+        self._policy = policy
 
     def resolve(self, rel, *, must_exist: bool = False, write: bool = False):
+        _method_enabled(self._policy, "ws.resolve")
         return self._ws.resolve(rel, must_exist=must_exist, write=write)
 
     def read_text(self, rel: str, encoding: str = "utf-8") -> str:
+        _method_enabled(self._policy, "ws.read_text")
         return self._ws.resolve(rel, must_exist=True).read_text(
             encoding=encoding, errors="replace"
         )
 
     def write_text(self, rel: str, content: str, encoding: str = "utf-8") -> str:
+        _method_enabled(self._policy, "ws.write_text")
         out = self._ws.resolve(rel, write=True)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(content, encoding=encoding)
@@ -86,6 +96,7 @@ class _ConfinedWorkspace:
         return str(out)
 
     def list_files(self, subdir: str = "", pattern: str = "*") -> list[str]:
+        _method_enabled(self._policy, "ws.list_files")
         return self._ws.list_files(subdir, pattern)
 
     @property
@@ -104,15 +115,19 @@ class _ConfinedWorkspace:
 class _VisionFacade:
     """Ask the configured vision model about the map or a workspace image.
 
-    This is the Python-side form of the ``analyze_image`` tool: it returns text,
-    not an image part, so a snippet can loop over tiles and parse JSON boxes.
-    Only workspace paths and the live map are accepted; there is no arbitrary
-    URL or raw bytes entry point.
+    ``analyze_image`` and this facade share
+    :func:`analyze_image_source`; the facade returns the answer text only.
     """
 
-    def __init__(self, workspace: Workspace, services: dict) -> None:
+    def __init__(
+        self,
+        workspace: Workspace,
+        services: dict,
+        policy: PythonPolicy | None = None,
+    ) -> None:
         self._workspace = workspace
         self._services = services
+        self._policy = policy
 
     @property
     def supported(self) -> bool:
@@ -135,42 +150,18 @@ class _VisionFacade:
         is DeepSeek's reasoning switch; it defaults off so JSON/box answers are
         not lost to reasoning, and is ignored by other providers.
         """
-        service = self._services.get(VISION_SERVICE)
-        if service is None:
-            raise ToolInputError(
-                "image input is not configured for this session; reopen the "
-                "workspace after enabling a vision-capable model"
-            )
-        if not service.supported:
-            raise ToolInputError(
-                "image input is not available for the configured model; "
-                "choose a vision-capable OpenAI-compatible model"
-            )
-        question = (question or "").strip()
-        if not question:
-            raise ToolInputError("question is required")
-        limit = max(256, min(int(max_side), 2048))
-        source = (image or "map").strip()
-        if source == "map":
-            if bands:
-                raise ToolInputError(
-                    "bands only applies to a raster image, not the live map capture"
-                )
-            broker = self._services.get(CAPTURE_SERVICE)
-            if broker is None:
-                raise ToolInputError("the map capture service is not available")
-            capture = broker.request(workspace=self._workspace.root.name)
-            data, _, _ = encode_capture(capture.image, limit)
-        else:
-            path = self._workspace.resolve(source, must_exist=True)
-            data, _, _, _, _, _ = load_image(path, limit, bands)
-        return service.ask(
+        _method_enabled(self._policy, "vision.ask")
+        answer = analyze_image_source(
             question,
-            data,
-            "image/jpeg",
+            source=image,
+            workspace=self._workspace,
+            services=self._services,
+            max_side=max_side,
+            bands=bands,
             thinking=thinking,
             max_tokens=max_tokens,
         )
+        return answer.text
 
 
 class _ModelCache:
@@ -181,8 +172,12 @@ class _ModelCache:
     this directory. Nothing here fetches: the sandbox has no network.
     """
 
+    def __init__(self, policy: PythonPolicy | None = None) -> None:
+        self._policy = policy
+
     def dir(self, repo: str = "") -> str:
         """Return the cache root, or one repository's directory."""
+        _method_enabled(self._policy, "models.dir")
         root = models_dir()
         return str(root / repo) if repo else str(root)
 
@@ -193,6 +188,7 @@ class _ModelCache:
         (``<repo>/<revision>/<file>``), so a path that names only the repository
         is looked up one level down before it is called missing.
         """
+        _method_enabled(self._policy, "models.path")
         target = models_dir() / repo
         if filename:
             target = target / filename
@@ -209,6 +205,7 @@ class _ModelCache:
 
     def list(self, repo: str = "") -> list[str]:
         """List cached repositories, or the files inside one."""
+        _method_enabled(self._policy, "models.list")
         root = Path(self.dir(repo))
         if not root.is_dir():
             return []
@@ -230,32 +227,52 @@ class PythonExecutor:
         *,
         approved: bool = False,
         services: dict | None = None,
+        policy: PythonPolicy | None = None,
     ) -> None:
         self.workspace = workspace
         self.approved = bool(approved)
         self.services = services or {}
+        self.policy = policy or PythonPolicy()
         self.output = OutputStore()
 
     def namespace(self) -> dict:
-        """Return the globals a snippet runs against (fresh per execution)."""
-        return {
-            "ws": _ConfinedWorkspace(self.workspace),
-            "vision": _VisionFacade(self.workspace, self.services),
-            "models": _ModelCache(),
-            "rasterio": rasterio,
-            "rioxarray": rioxarray,
-            "gpd": gpd,
-            "np": np,
-            "pd": pd,
-            "xr": xarray,
-            "shapely": shapely,
-            "pyproj": pyproj,
-            "skimage": skimage,
-            "scipy": scipy,
-            "rio_cogeo": rio_cogeo,
-            "json": json,
-            **packages.bindings(),
+        """Return the globals a snippet runs against (fresh per execution).
+
+        Disabled packages are absent from both the import guard and this
+        namespace, including their short aliases, so a snippet cannot keep a
+        module handle the policy says it may not import.
+        """
+        policy = self.policy
+        namespace: dict = {}
+        modules = {
+            "rasterio": ("rasterio", rasterio),
+            "rioxarray": ("rioxarray", rioxarray),
+            "numpy": ("numpy", np),
+            "np": ("numpy", np),
+            "pandas": ("pandas", pd),
+            "pd": ("pandas", pd),
+            "geopandas": ("geopandas", gpd),
+            "gpd": ("geopandas", gpd),
+            "xarray": ("xarray", xarray),
+            "xr": ("xarray", xarray),
+            "shapely": ("shapely", shapely),
+            "pyproj": ("pyproj", pyproj),
+            "skimage": ("skimage", skimage),
+            "scipy": ("scipy", scipy),
+            "rio_cogeo": ("rio_cogeo", rio_cogeo),
+            "json": ("json", json),
         }
+        for name, (root, module) in modules.items():
+            if policy.allows_import(root):
+                namespace[name] = module
+        if policy.any_method("ws."):
+            namespace["ws"] = _ConfinedWorkspace(self.workspace, policy)
+        if policy.any_method("vision."):
+            namespace["vision"] = _VisionFacade(self.workspace, self.services, policy)
+        if policy.any_method("models."):
+            namespace["models"] = _ModelCache(policy)
+        namespace.update(packages.bindings(policy))
+        return namespace
 
     def run(self, code: str, timeout: float | None = None) -> str:
         """Execute ``code`` and return the truncated preview of its output.
@@ -273,7 +290,7 @@ class PythonExecutor:
             return self.output.store(f"SyntaxError: {exc}")
 
         if not self.approved:
-            violation = guard(tree)
+            violation = guard(tree, self.policy)
             if violation is not None:
                 return self.output.store(
                     f"run_python blocked: {violation}. Use the structured tools, or "

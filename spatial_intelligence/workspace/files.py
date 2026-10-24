@@ -46,10 +46,10 @@ MIN_READ_BYTES = 16_000
 _USER_AGENT = "spatial-intelligence/0.1"
 _HTTPS_SCHEMES = ("http://", "https://")
 
-#: Files the harness owns: the notebook, the manifest, and the live map state.
+#: Files the harness owns: notebook, manifest, tool configuration, live map.
 #: They are never listed for rename/delete in the Data tab.
 HARNESS_FILES = frozenset(
-    {"notebook.ipynb", "workspace.json", "maps/current.geolibre.json"}
+    {"notebook.ipynb", "workspace.json", "tools.json", "maps/current.geolibre.json"}
 )
 #: Directories the harness owns wholesale (run traces).
 HARNESS_PREFIXES = ("traces/",)

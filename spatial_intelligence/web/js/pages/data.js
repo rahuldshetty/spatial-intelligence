@@ -12,10 +12,12 @@ import { applySnapshot, state } from "../store.js";
 import { closeDialog, el, formatBytes, openDialog, toast } from "../dom.js";
 import { icon } from "../icons.js";
 import { renderFileTree } from "../components/file-tree.js";
+import { offerDroneImport } from "../components/drone-import.js";
 
 const HARNESS_FILES = new Set([
   "notebook.ipynb",
   "workspace.json",
+  "tools.json",
   "maps/current.geolibre.json",
 ]);
 
@@ -115,6 +117,7 @@ export function renderDataTab() {
       renderFileTree(files, {
         onRename: (path) => openRenameDialog(path),
         onDelete: (path) => confirmDeleteFile(path),
+        onContextMenu: (path, event, isDir) => openTreeMenu(path, event, isDir),
       })
     );
   }
@@ -162,6 +165,61 @@ export async function refreshWorkspaceData() {
   }
 }
 
+let treeMenu = null;
+let treeMenuDismiss = null;
+
+function closeTreeMenu() {
+  if (treeMenuDismiss) {
+    treeMenuDismiss();
+    treeMenuDismiss = null;
+  }
+  if (treeMenu) {
+    treeMenu.remove();
+    treeMenu = null;
+  }
+}
+
+function openTreeMenu(path, event, isDir) {
+  closeTreeMenu();
+  const menu = el("div", { class: "tree-menu", role: "menu" });
+  const item = el("button", {
+    type: "button",
+    class: "tree-menu-item",
+    role: "menuitem",
+  });
+  item.append(
+    icon(isDir ? "folder" : "globe", { size: 14 }),
+    el("span", { text: isDir ? "Import drone files to GeoLibre" : "Import to GeoLibre" })
+  );
+  item.addEventListener("click", () => {
+    closeTreeMenu();
+    offerDroneImport([path], { notifyIfEmpty: true });
+  });
+  menu.append(item);
+  document.body.append(menu);
+
+  const bounds = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8));
+  const top = Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8));
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+
+  const dismiss = (pointer) => {
+    if (!menu.contains(pointer.target)) closeTreeMenu();
+  };
+  const onKey = (keyboard) => {
+    if (keyboard.key === "Escape") closeTreeMenu();
+  };
+  document.addEventListener("pointerdown", dismiss, true);
+  document.addEventListener("keydown", onKey);
+  treeMenuDismiss = () => {
+    document.removeEventListener("pointerdown", dismiss, true);
+    document.removeEventListener("keydown", onKey);
+  };
+  treeMenu = menu;
+  item.focus();
+}
+
 async function uploadFiles(fileList) {
   if (!fileList || !fileList.length) {
     toast("Choose a file or folder first", "warning");
@@ -172,6 +230,7 @@ async function uploadFiles(fileList) {
     const names = result.imported || [];
     applySnapshot(await getState());
     toast("Imported " + names.length + " file(s)", "success");
+    if (names.length) await offerDroneImport(names);
   } catch (e) {
     toast(e.message || String(e), "error");
   }
@@ -349,10 +408,11 @@ export function openUrlDialog() {
         }
         const size = check.content_length ? " (" + formatBytes(check.content_length) + ")" : "";
         setStatus("Downloading " + (check.filename || "file") + size + "…");
-        await postImportUrl(url, check.filename || null);
+        const imported = await postImportUrl(url, check.filename || null);
         applySnapshot(await getState());
         closeDialog();
         toast("Downloaded into the workspace data folder", "success");
+        if (imported.path) await offerDroneImport([imported.path]);
       } catch (error) {
         setStatus(error.message || String(error), "error");
         download.disabled = false;

@@ -27,6 +27,7 @@ class PythonPack:
                 runtime.workspace,
                 approved=runtime.approved,
                 services=runtime.services,
+                policy=runtime.python_policy,
             ),
         )
 
@@ -37,11 +38,13 @@ class PythonPack:
         In safe mode the sandbox exposes the geospatial stack (``numpy``, ``pandas``,
         ``geopandas``, ``rasterio``, ``rioxarray``, ``xarray``, ``shapely``, ``pyproj``),
         basic stdlib (``os``, ``sys``, ``pathlib``, ``shutil``, ...), a
-        workspace-confined ``ws`` helper, and a read-only ``models`` view of the
-        model cache; subprocess, network, dynamic execution, and raw command calls
+        workspace-confined ``ws`` helper (when enabled), and a read-only
+        ``models`` view of the model cache; subprocess, network, dynamic
+        execution, and raw command calls
         are rejected. Heavy packages installed as the ``geoai`` extra (torchgeo,
-        terratorch, torch) are importable too — skill() documents their APIs.
-        With dangerous mode enabled every guard is lifted.
+        terratorch, torch) are importable too — skill() documents their APIs,
+        unless Tool Configuration disabled them or a helper method. With
+        dangerous mode enabled every guard is lifted.
 
         ``timeout_seconds`` raises the wall-clock cap for this call when a model
         needs minutes per tile (0 keeps the default). The snippet runs on a
@@ -90,7 +93,7 @@ class PythonPack:
         argument it lists the available top-level roots. Use this instead of
         writing ``dir()``/``__doc__``/``inspect.signature`` probes in run_python.
         """
-        return api_help.describe(name)
+        return api_help.describe(name, self.executor.policy)
 
 
 __all__ = ["PythonPack"]

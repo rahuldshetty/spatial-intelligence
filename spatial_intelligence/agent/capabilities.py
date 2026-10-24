@@ -148,6 +148,8 @@ class ToolFailurePolicy(AbstractCapability[ToolRuntime]):
 
         The final attempt sits outside the loop, so a transient failure is
         always given every attempt before it is allowed to reach the model.
+        Map mutations are serialized by ``map.layers`` itself; holding a
+        thread lock across this await would block the event loop instead.
         """
         for attempt in range(1, TRANSIENT_TOOL_ATTEMPTS):
             try:

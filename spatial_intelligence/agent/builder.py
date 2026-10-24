@@ -17,6 +17,7 @@ from pydantic_ai_harness import (
 )
 from pydantic_ai_harness.planning import InMemoryPlanStore
 
+from ..pythonruntime.policy import PythonPolicy
 from ..tools.registry import ToolRegistry
 from ..websearch import web_search
 from .capabilities import NormalizeDuplicateToolNames, ToolFailurePolicy
@@ -49,6 +50,8 @@ def build_agent(
     *,
     tool_retries: int = TOOL_RETRIES,
     context_window: int = 0,
+    python_policy: PythonPolicy | None = None,
+    disabled_tools: tuple[str, ...] | list[str] = (),
 ) -> BuiltAgent:
     """Build a pydantic-ai ``Agent`` with every registered tool.
 
@@ -57,12 +60,14 @@ def build_agent(
     ``model`` may be a model string, a ready-made ``Model``, or a zero-argument
     callable returning a string, so a settings change can be picked up without
     rebuilding this function. ``context_window`` is the model's real window in
-    tokens, or 0 to resolve it from the model id.
+    tokens, or 0 to resolve it from the model id. ``python_policy`` narrows the
+    run_python imports and helper methods the system prompt advertises;
+    ``disabled_tools`` names the tools the prompt must not send the model to.
     """
     plan_store = InMemoryPlanStore()
     agent: Agent = Agent(
         resolve_model(model() if callable(model) else model),
-        system_prompt=system_prompt(),
+        system_prompt=system_prompt(python_policy, disabled_tools),
         output_type=[str, DeferredToolRequests],
         retries={"tools": tool_retries},
         capabilities=[

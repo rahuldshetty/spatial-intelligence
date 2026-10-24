@@ -269,6 +269,11 @@ class LayersPack:
             bands=bands,
             file_url=self._rt.file_url,
         )
+        if layerops.find_layer(self._map, layer_id) is None:
+            raise ToolInputError(
+                "the raster layer was not present after it was added; the map changed "
+                "while the layer was being added — retry the call"
+            )
         self._mutated()
         return layer_id
 

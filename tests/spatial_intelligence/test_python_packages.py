@@ -97,7 +97,7 @@ class InstalledDetectionTests(FakePackageTestCase):
         self.assertIn("Installed on this machine", block)
 
     def test_the_system_prompt_grows_only_by_the_block(self):
-        with patch.object(packages, "prompt_block", lambda: ""):
+        with patch.object(packages, "prompt_block", lambda policy=None: ""):
             lean = prompt_module.system_prompt()
 
         rich = prompt_module.system_prompt()

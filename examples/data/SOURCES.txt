@@ -1,0 +1,26 @@
+Sample drone imagery used for import smoke tests.
+
+dji-orthority/100_0005_*.tif
+dji-orthority/odm_dem/dsm.tif
+  Source: Orthority test data, tests/data/odm
+  https://github.com/leftfield-geospatial/orthority
+  Upstream: OpenDroneMap test dataset; DJI FC6310R capture.
+  The four frames plus odm_dem/dsm.tif are the orthorectification example:
+  import the folder and enable "Build an orthomosaic".
+  License: upstream does not declare one for this test data; kept as a local
+  fixture only and not included in the AppImage.
+
+odm-sony/DSC00229.JPG
+  Source: OpenDroneMap/odm_data_aukerman, images/DSC00229.JPG
+  https://github.com/OpenDroneMap/odm_data_aukerman
+  Aerial survey image with EXIF GPS.
+  License: the upstream repository declares none; kept as a local fixture only
+  and not included in the AppImage.
+
+orthomosaic-lienhuachih/lienhuachih-ortho.tif
+  Source: OpenAerialMap record 6406d918c2655600066c29a0
+  "Trail of Lienhuachih, Puli, Taiwan" by Jen-Chang Liu
+  DJI Mavic Air 2, 2023-02-14, 0.05 m GSD, EPSG:32651, 3-band COG.
+  License: CC-BY 4.0
+  https://api.openaerialmap.org/meta/6406d918c2655600066c29a0
+  https://oin-hotosm-temp.s3.amazonaws.com/6406d8ccc2655600066c299e/0/6406d8ccc2655600066c299f.tif

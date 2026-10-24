@@ -410,6 +410,297 @@
   accent-color: var(--primary);
 }
 
+/* -- tool configuration --------------------------------------------------- */
+
+#dialog.tool-config-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(880px, calc(100vw - 40px));
+  max-width: 880px;
+  max-height: calc(100vh - 40px);
+  padding: 20px 0 0;
+  overflow: hidden;
+}
+
+.tool-config-dialog .dialog-heading,
+.tool-config-dialog .tool-config-scope,
+.tool-config-dialog .tool-config-tabs,
+.tool-config-dialog .dialog-status,
+.tool-config-dialog .dialog-actions {
+  margin-left: 22px;
+  margin-right: 22px;
+}
+
+.tool-config-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 8px;
+}
+
+.scope-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.scope-switch button {
+  padding: 5px 11px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scope-switch button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.scope-switch button.active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.scope-switch button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tool-config-scope-note {
+  flex: 1 1 300px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.tool-config-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-config-tabs button {
+  margin-bottom: -1px;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tool-config-tabs button:hover {
+  color: var(--text);
+}
+
+.tool-config-tabs button.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.tool-config-body {
+  flex: 1 1 auto;
+  min-height: 180px;
+  max-height: min(520px, calc(100vh - 280px));
+  overflow-y: auto;
+  padding: 4px 22px 10px;
+}
+
+.tool-config-intro,
+.tool-config-note {
+  margin: 10px 0 6px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.tool-config-note {
+  margin-top: 0;
+  color: var(--text-2);
+}
+
+.tool-config-search {
+  width: 100%;
+  margin: 6px 0 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.tool-config-search:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.tool-category {
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-category:last-child {
+  border-bottom: none;
+}
+
+.tool-category-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 2px 6px;
+}
+
+.tool-category-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tool-category-name {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.tool-category-meta,
+.tool-category-hint {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tool-category-toggle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.tool-category-toggle:disabled {
+  opacity: 0.35;
+}
+
+.tool-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.tool-row:hover {
+  background: var(--surface-2);
+}
+
+.tool-row.disabled {
+  opacity: 0.62;
+}
+
+.tool-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+}
+
+.tool-row input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.tool-row-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tool-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.tool-row-name {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.tool-row-summary {
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.tool-badge.locked {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.tool-config-empty {
+  margin: 18px 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.tool-config-dialog .dialog-status {
+  min-height: 16px;
+  margin-top: 4px;
+}
+
+.tool-config-dialog .dialog-actions {
+  margin-top: 0;
+  padding: 10px 0 16px;
+  border-top: 1px solid var(--border);
+}
+
+.dialog-footer-hint {
+  align-self: center;
+  margin-right: auto;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
 #ws-list {
   list-style: none;
   margin: 0 0 16px;
@@ -1743,4 +2034,114 @@
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* -- drone import prompt -------------------------------------------------- */
+
+.drone-detect-summary {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.drone-detect-list {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.drone-detect-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drone-detect-row:last-child {
+  border-bottom: none;
+}
+
+.drone-detect-icon {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+
+.drone-detect-icon.kind-raster {
+  color: var(--accent);
+}
+
+.drone-detect-icon.kind-photo {
+  color: var(--warn);
+}
+
+.drone-detect-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drone-detect-name {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drone-detect-detail {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drone-detect-size {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.drone-ortho-option {
+  margin: 0;
+}
+
+.drone-ortho-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--primary-border);
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  cursor: pointer;
+}
+
+.drone-ortho-label input {
+  margin-top: 2px;
+}
+
+.drone-ortho-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.drone-ortho-copy strong {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.drone-ortho-copy small,
+.drone-ortho-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
 }

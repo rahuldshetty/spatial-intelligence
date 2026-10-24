@@ -9,6 +9,7 @@ from geolibre import Map
 from geolibre import project as geolibre_project
 
 from ..contracts.errors import ToolInputError
+from ..map import MAP_LOCK
 from ..map import document
 from ..settings.env import workspace_root
 from ..workspace import Workspace
@@ -27,6 +28,9 @@ class WorkspaceSession:
         self._root_for = root_for
         self.name: str | None = None
         self.workspace: Workspace | None = None
+        #: Monotonic revision of the live map project; stale browser pushes
+        #: carry an older value and are rejected by the session.
+        self.map_revision = 0
         self.map = Map(
             center=EMPTY_VIEW["center"],
             zoom=EMPTY_VIEW["zoom"],
@@ -43,14 +47,16 @@ class WorkspaceSession:
         self.name = name
         self.workspace = workspace
         snapshot = document.snapshot_path(workspace)
-        if snapshot.exists():
-            self.map.load_project(snapshot)
-        else:
-            self.map.load_project(
-                geolibre_project.build_empty_project(
-                    center=EMPTY_VIEW["center"], zoom=EMPTY_VIEW["zoom"]
+        with MAP_LOCK:
+            self.map_revision = 0
+            if snapshot.exists():
+                self.map.load_project(snapshot)
+            else:
+                self.map.load_project(
+                    geolibre_project.build_empty_project(
+                        center=EMPTY_VIEW["center"], zoom=EMPTY_VIEW["zoom"]
+                    )
                 )
-            )
         return workspace
 
     def new(self, name: str) -> Workspace:
@@ -70,13 +76,21 @@ class WorkspaceSession:
         """Forget the open workspace and reset the map to an empty project."""
         self.name = None
         self.workspace = None
-        self.map.load_project(
-            geolibre_project.build_empty_project(
-                center=EMPTY_VIEW["center"], zoom=EMPTY_VIEW["zoom"]
+        with MAP_LOCK:
+            self.map_revision = 0
+            self.map.load_project(
+                geolibre_project.build_empty_project(
+                    center=EMPTY_VIEW["center"], zoom=EMPTY_VIEW["zoom"]
+                )
             )
-        )
 
     # -- map -------------------------------------------------------------
+
+    def bump_map_revision(self) -> int:
+        """Mark the live project as changed and return the new revision."""
+        with MAP_LOCK:
+            self.map_revision += 1
+            return self.map_revision
 
     def save_map(self) -> None:
         """Persist the live map into the workspace snapshot."""
@@ -87,13 +101,30 @@ class WorkspaceSession:
         """Adopt a project pushed by the browser and persist it."""
         if self.workspace is None:
             raise ValueError("no workspace open")
-        self.map.load_project(project)
-        self.map.save_project(str(document.snapshot_path(self.workspace)))
-        self.workspace.bump()
+        with MAP_LOCK:
+            self.map.load_project(project)
+            document.persist_map(self.map, self.workspace)
+            self.bump_map_revision()
 
     def project(self) -> dict:
         """The live project, as sent to the browser."""
-        return self.map.to_project()
+        with MAP_LOCK:
+            return self.map.to_project()
+
+    def map_state(self) -> dict:
+        """Return the workspace, project, and revision captured atomically.
+
+        Revision numbers are scoped to one workspace: the same number in two
+        workspaces means nothing, so every map event carries the workspace it
+        belongs to.
+        """
+        with MAP_LOCK:
+            workspace = self.workspace
+            return {
+                "workspace": workspace.root.name if workspace is not None else None,
+                "project": self.map.to_project(),
+                "revision": self.map_revision,
+            }
 
     # -- files -----------------------------------------------------------
 

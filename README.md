@@ -15,6 +15,8 @@ every output is a real file in the workspace you can inspect or reuse.
 - Search and download open imagery: STAC catalogs (Sentinel-2, Landsat, NAIP,
   Sentinel-1, DEMs), Vantor disaster releases, OpenAerialMap.
 - Import local files or folders, or download by URL, into the workspace.
+- Import geotagged drone photos as point layers, or orthorectify frames against
+  a DEM into one orthomosaic COG (Orthority, AGPL-3.0-or-later).
 - Resolve a place name to an area of interest, and search the web for
   documentation, provider terms, or current facts.
 
@@ -145,6 +147,18 @@ Settings come from `.env` in the data root (loaded at startup) and from
 to `settings.json`. **Dangerous mode** (the toggle at the right of the menu bar)
 lifts the sandbox guard; leave it off unless you are running your own code.
 
+The sliders button beside Settings opens **Tool Configuration**. It has two
+tabs: **Tools** enables or disables tool categories (including object
+detection, segmentation, and image analysis), and **Python runtime** controls
+which packages `run_python` may import and which helper methods (`ws.*`,
+`vision.ask`, `models.*`) it exposes. The scope switch chooses where Save
+writes: **Global** writes `<data root>/workspaces/tools.json`; **This
+workspace** writes `tools.json` inside that workspace directory, which
+overrides the global file. Cancel (or closing the dialog) discards every
+unsaved change. Locked tools stay enabled because the system prompt depends on
+them; harness capabilities (planning, tool search, web search) are always
+available.
+
 **Model**
 
 | Variable | Default | Purpose |
@@ -160,7 +174,7 @@ lifts the sandbox guard; leave it off unless you are running your own code.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GEOAI_HOME` | the checkout root in a dev clone, else `~/.local/share/spatial-intelligence` | Data root: `workspaces/`, `settings.json`, `.env`, `.models/`, `.skills/`. |
+| `GEOAI_HOME` | the checkout root in a dev clone, else `~/.local/share/spatial-intelligence` | Data root: `workspaces/` (including `workspaces/tools.json`), `settings.json`, `.env`, `.models/`, `.skills/`. |
 | `GEOAI_MODELS_DIR` | `<GEOAI_HOME>/.models` | Where models and weights are cached. |
 | `GEOAI_SKILLS_DIR` | `<GEOAI_HOME>/.skills` | Per-machine skills cache; the shipped trees live in the package. |
 | `GEOAI_OFFLINE` | off | Set to `1` to refuse every download. |

@@ -81,6 +81,13 @@ export function renderTreeNode(node, actions = {}) {
       icon("folder", { size: 15, class: "tree-icon kind-folder" }),
       el("span", { class: "tree-name", text: node.name })
     );
+    if (actions.onContextMenu) {
+      summary.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        actions.onContextMenu(node.path, event, true);
+      });
+    }
     details.append(summary);
     const childUl = el("ul", { class: "file-tree" });
     for (const child of sortedChildren(node)) {
@@ -96,6 +103,13 @@ export function renderTreeNode(node, actions = {}) {
     icon(meta.name, { size: 14, class: "tree-icon " + meta.className }),
     el("span", { class: "tree-name", text: node.name })
   );
+  if (actions.onContextMenu) {
+    li.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      actions.onContextMenu(node.path, event, false);
+    });
+  }
   if (actions.onRename || actions.onDelete) {
     const tools = el("span", { class: "tree-actions" });
     if (actions.onRename) {

@@ -35,6 +35,14 @@ export function updateSettings(patch) {
   return request("PUT", "/api/settings", patch);
 }
 
+export function getToolConfig() {
+  return request("GET", "/api/tools/config");
+}
+
+export function saveToolConfig(scope, config) {
+  return request("PUT", "/api/tools/config", { scope, config });
+}
+
 export function listWorkflows() {
   return request("GET", "/api/workflows");
 }
@@ -173,6 +181,18 @@ export function importUrl(url, filename = null) {
   return request("POST", "/api/import/url", { url, filename });
 }
 
+export function detectDroneFiles(paths) {
+  return request("POST", "/api/drone/detect", { paths });
+}
+
+export function importDroneFiles(paths, orthorectify = false) {
+  return request("POST", "/api/drone/import", { paths, orthorectify });
+}
+
+export function cancelDroneImport(jobId) {
+  return request("POST", "/api/drone/cancel", { job_id: jobId });
+}
+
 export function deleteWorkspaceFile(path) {
   return request("POST", "/api/files/delete", { path });
 }
@@ -186,8 +206,11 @@ export function checkImportUrl(url) {
   return request("POST", "/api/import/check", { url });
 }
 
-export function setMapProject(project) {
-  return request("POST", "/api/map/project", { project });
+export function setMapProject(project, revision = null, workspace = null) {
+  const body = { project };
+  if (revision != null) body.revision = revision;
+  if (workspace != null) body.workspace = workspace;
+  return request("POST", "/api/map/project", body);
 }
 
 /** Resolve a pending JSON map query the server sent over SSE. */

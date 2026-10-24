@@ -8,6 +8,7 @@ import { icon, menuLabel } from "../icons.js";
 import { addCell } from "../pages/cells.js";
 import { applySnapshot, setState, state } from "../store.js";
 import { openSettingsDialog } from "./settings-dialog.js";
+import { openToolConfigDialog } from "./tool-config-dialog.js";
 import { openWorkflowDialog } from "./workflow-dialog.js";
 import { openWorkspaceDialog } from "./workspace-dialog.js";
 
@@ -51,6 +52,7 @@ function fileMenu() {
     menuItem("x", "Close workspace", doClose, "", !state.active_workspace),
     el("div", { class: "separator" }),
     menuItem("settings", "Settings…", () => openSettingsDialog(), "Ctrl ,"),
+    menuItem("sliders", "Tool Configuration…", () => openToolConfigDialog(), "Ctrl ⇧ ,"),
     el("div", { class: "separator" }),
     menuItem("power", "Close all workspaces", doCloseAll)
   );
@@ -91,6 +93,11 @@ function rightActions() {
   nodes.push(themeToggle());
   nodes.push(
     iconButton("settings", "Settings", () => openSettingsDialog(), { id: "settings-button" })
+  );
+  nodes.push(
+    iconButton("sliders", "Tool Configuration", () => openToolConfigDialog(), {
+      id: "tool-config-button",
+    })
   );
   nodes.push(dangerToggle());
   return nodes;

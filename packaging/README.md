@@ -143,10 +143,19 @@ optional. The rest of the app (map, python cells, file data) works without one.
    `dist/spatial-intelligence/`. The spec collects everything PyInstaller
    cannot see statically: the `spatial_intelligence` submodules reached only
    through import strings, the `web/` assets, pydantic-ai's name-resolved
-   providers/models, pydantic-ai-harness and geolibre data, and the geo-stack
-   wheels' data files (proj.db, GDAL resources) plus uvicorn's
+   providers/models, pydantic-ai-harness, geolibre data, the orthority package
+   and its submodules, the headless OpenCV binaries it imports, and the
+   geo-stack wheels' data files (proj.db, GDAL resources) plus uvicorn's
    import-string-loaded loop/protocol modules.
 4. AppDir assembly (`usr/bin/spatial-intelligence`, desktop file, icon,
    `.DirIcon`) and `appimagetool --appimage-extract-and-run` to produce the
    AppImage.
 5. `FROM scratch AS artifacts` — the `--output` export stage.
+
+## Licensing
+
+Orthority is AGPL-3.0-or-later and is bundled by default, so the AppImage ships
+`usr/share/doc/spatial-intelligence/THIRD_PARTY_NOTICES.md` and the full AGPL
+text under `.../licenses/`. The build replaces Orthority's GUI OpenCV wheel with
+`opencv-python-headless` so the bundle does not require libGL or X11, and it
+fails the build if both wheels are installed.

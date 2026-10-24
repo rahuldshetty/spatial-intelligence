@@ -289,6 +289,7 @@ const document = {
   readyState: "complete",
   documentElement,
   body,
+  activeElement: null,
   createElement: (tag) => new ShimNode(tag),
   createTextNode: (value) => textNode(value),
   getElementById: (id) => documentElement.descendants([]).find((node) => node.getAttribute("id") === id) || null,
@@ -535,6 +536,107 @@ await scenario("store", async () => {
   eq("store.snapshot_jobs", store.state.jobs.length, 1);
   eq("store.snapshot_theme_attr", document.documentElement.getAttribute("data-theme"), "dark");
   eq("store.snapshot_keeps_tab", store.state.selected_tab, "Cells");
+
+  store.setState({ map_revision: 5, map_project: { layers: [{ id: "new" }] } });
+  store.applySnapshot({ map_revision: 4, map_project: { layers: [] } });
+  eq("store.stale_snapshot_keeps_project", store.state.map_project, { layers: [{ id: "new" }] });
+  eq("store.stale_snapshot_keeps_revision", store.state.map_revision, 5);
+  store.applySnapshot({ map_revision: 6, map_project: { layers: [] } });
+  eq("store.new_snapshot_replaces_project", store.state.map_project, { layers: [] });
+  eq("store.new_snapshot_advances_revision", store.state.map_revision, 6);
+
+  store.setState({
+    active_workspace: "A",
+    map_revision: 7,
+    map_project: { layers: [{ id: "a" }] },
+  });
+  store.applySnapshot({
+    active_workspace: "B",
+    map_revision: 0,
+    map_project: { layers: [] },
+  });
+  eq("store.workspace_switch_takes_new_project", store.state.map_project, { layers: [] });
+  eq("store.workspace_switch_resets_revision", store.state.map_revision, 0);
+
+  store.setState({
+    jobs: [
+      {
+        job_id: "ortho",
+        parent_id: "c1",
+        kind: "drone.orthorectify",
+        status: "done",
+      },
+    ],
+  });
+  eq("store.hides_ortho_job_from_cells", store.jobsFor("c1"), []);
+  eq("store.keeps_ortho_job_for_tracing", store.state.jobs.length, 1);
+});
+
+await scenario("cells", async () => {
+  const store = await import(webUrl("store.js"));
+  const cells = await import(webUrl("components/cell.js"));
+
+  store.setState({
+    active_workspace: "ws",
+    cells: [
+      { id: "a", kind: "prompt", source: "", status: "idle" },
+      { id: "b", kind: "prompt", source: "", status: "idle" },
+    ],
+  });
+  const node = cells.renderCell(store.state.cells[0], []);
+  const buttons = node.querySelectorAll("button");
+  const up = buttons.find((button) => button.getAttribute("aria-label") === "Move up");
+  const down = buttons.find((button) => button.getAttribute("aria-label") === "Move down");
+  check("cells.move_up_disabled_at_top", Boolean(up) && up.disabled === true);
+  check("cells.move_down_enabled", Boolean(down) && down.disabled === false);
+
+  fetchCalls.length = 0;
+  fetchResponder = () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({
+      active_workspace: "ws",
+      cells: [
+        { id: "b", kind: "prompt", source: "", status: "idle" },
+        { id: "a", kind: "prompt", source: "", status: "idle" },
+      ],
+    }),
+  });
+  down.click();
+  await tick();
+  await tick();
+  eq(
+    "cells.move_request",
+    fetchCalls.map((call) => [call.method, call.url, call.body]),
+    [["POST", "/api/cells/a/move", JSON.stringify({ index: 1 })]]
+  );
+  eq("cells.move_applies_snapshot", store.state.cells.map((cell) => cell.id), ["b", "a"]);
+
+  const page = await import(webUrl("pages/cells.js"));
+  store.setState({
+    active_workspace: "ws",
+    cells: [{ id: "a", kind: "prompt", source: "", status: "idle" }],
+    jobs: [
+      { job_id: "job-1", kind: "download", status: "done", label: "Import" },
+      {
+        job_id: "job-2",
+        kind: "drone.orthorectify",
+        status: "done",
+        label: "Ortho",
+      },
+    ],
+  });
+  const tab = page.renderCellsTab();
+  eq("cells.job_renders_first", tab.children[0].getAttribute("data-job-id"), "job-1");
+  eq("cells.cell_renders_after_job", tab.children[1].getAttribute("data-cell-id"), "a");
+  eq(
+    "cells.ortho_job_hidden",
+    tab
+      .querySelectorAll(".cell")
+      .filter((node) => node.getAttribute("data-job-id") === "job-2").length,
+    0
+  );
 });
 
 await scenario("api", async () => {
@@ -588,6 +690,26 @@ await scenario("api", async () => {
     "api.update_settings",
     [fetchCalls[0].url, fetchCalls[0].method, fetchCalls[0].body],
     ["/api/settings", "PUT", JSON.stringify({ theme: "dark" })]
+  );
+
+  fetchCalls.length = 0;
+  await api.getToolConfig();
+  eq(
+    "api.get_tool_config",
+    [fetchCalls[0].url, fetchCalls[0].method],
+    ["/api/tools/config", "GET"]
+  );
+
+  fetchCalls.length = 0;
+  await api.saveToolConfig("workspace", { disabled_tools: ["buffer"] });
+  eq(
+    "api.save_tool_config",
+    [fetchCalls[0].url, fetchCalls[0].method, fetchCalls[0].body],
+    [
+      "/api/tools/config",
+      "PUT",
+      JSON.stringify({ scope: "workspace", config: { disabled_tools: ["buffer"] } }),
+    ]
   );
 
   fetchCalls.length = 0;
@@ -738,6 +860,7 @@ if (gated) {
     const firstMap = app.querySelector("#map-panel");
     check("shell.first_render_regions", Boolean(firstMenubar && firstMap && app.querySelector("#side-panel")));
     check("shell.tab_content", Boolean(app.querySelector("#tab-content")));
+    check("shell.tool_config_button", Boolean(app.querySelector("#tool-config-button")));
     const toggle = app.querySelector("#follow-output");
     check("shell.follow_toggle_in_status_bar", Boolean(toggle && toggle.closest("#status-bar")));
 
@@ -760,6 +883,7 @@ if (gated) {
       "pages/map.js": ["mountMap", "syncMap"],
       "components/menubar.js": ["renderMenubar", "closeAllMenus"],
       "components/settings-dialog.js": ["openSettingsDialog"],
+      "components/tool-config-dialog.js": ["openToolConfigDialog"],
     };
     for (const [relative, names] of Object.entries(expected)) {
       const module = await import(webUrl(relative));
@@ -792,6 +916,375 @@ if (gated) {
     );
   });
 }
+
+await scenario("tool_config", async () => {
+  const store = await import(webUrl("store.js"));
+  const dom = await import(webUrl("dom.js"));
+  dom.closeDialog();
+  store.state.active_workspace = "demo";
+
+  const base = {
+    source: "global",
+    global: {
+      disabled_tools: [],
+      python: { disabled_packages: [], disabled_methods: [] },
+    },
+    workspace: null,
+    effective: {
+      disabled_tools: [],
+      python: { disabled_packages: [], disabled_methods: [] },
+    },
+    categories: [
+      {
+        id: "files",
+        label: "Workspace files",
+        description: "Workspace file tools.",
+        configurable_count: 1,
+        enabled_count: 1,
+        tools: [
+          {
+            name: "read_file",
+            summary: "Read a workspace file.",
+            category: "files",
+            origin: "builtin",
+            core: true,
+            required: true,
+            required_reason: "Every text input path starts here.",
+            configurable: false,
+            enabled: true,
+            available: true,
+            model_specific: false,
+          },
+          {
+            name: "download",
+            summary: "Download a URL.",
+            category: "files",
+            origin: "builtin",
+            core: false,
+            required: false,
+            required_reason: "",
+            configurable: true,
+            enabled: true,
+            available: true,
+            model_specific: false,
+          },
+        ],
+      },
+      {
+        id: "detection",
+        label: "Object detection",
+        description: "Known objects with a local model.",
+        configurable_count: 1,
+        enabled_count: 1,
+        tools: [
+          {
+            name: "detect_objects",
+            summary: "Detect known objects.",
+            category: "detection",
+            origin: "builtin",
+            core: false,
+            required: false,
+            required_reason: "",
+            configurable: true,
+            enabled: true,
+            available: true,
+            model_specific: true,
+          },
+        ],
+      },
+    ],
+    required_tools: { read_file: "Every text input path starts here." },
+    python: {
+      packages: [
+        {
+          name: "numpy",
+          group: "Data & rasters",
+          purpose: "arrays",
+          optional: false,
+          installed: true,
+          version: "",
+          enabled: true,
+        },
+      ],
+      package_groups: ["Data & rasters"],
+      methods: [
+        {
+          name: "ws.write_text",
+          group: "Workspace helper",
+          purpose: "write text",
+          enabled: true,
+        },
+      ],
+      method_groups: ["Workspace helper"],
+    },
+  };
+  let saved = null;
+  fetchResponder = (url, options = {}) => {
+    if (url !== "/api/tools/config") {
+      return { ok: true, status: 200, statusText: "OK", json: async () => ({}) };
+    }
+    const method = options.method || "GET";
+    if (method === "GET") {
+      const config = saved ? saved.config : base.global;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ ...base, effective: config }),
+      };
+    }
+    saved = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        ...base,
+        source: saved.scope,
+        global: saved.config,
+        workspace: saved.scope === "workspace" ? saved.config : null,
+        effective: saved.config,
+      }),
+    };
+  };
+
+  const toolConfig = await import(webUrl("components/tool-config-dialog.js"));
+  toolConfig.openToolConfigDialog();
+  await tick();
+  await tick();
+
+  let overlay = document.getElementById("overlay");
+  check("tool_config.dialog", Boolean(overlay && overlay.querySelector(".tool-config-dialog")));
+  const findRow = (name) =>
+    overlay.querySelectorAll(".tool-row").find((row) => row.textContent.includes(name));
+  const requiredRow = findRow("read_file");
+  check(
+    "tool_config.required_locked",
+    Boolean(requiredRow && requiredRow.querySelector("input").disabled)
+  );
+  const detectRow = findRow("detect_objects");
+  check(
+    "tool_config.configurable_enabled",
+    Boolean(detectRow && detectRow.querySelector("input").checked)
+  );
+
+  const tabs = overlay.querySelectorAll(".tool-config-tabs button");
+  tabs.find((button) => button.textContent.includes("Python")).click();
+  check(
+    "tool_config.python_tab",
+    Boolean(overlay.querySelector(".tool-config-body").textContent.includes("numpy"))
+  );
+  overlay
+    .querySelectorAll(".tool-config-tabs button")
+    .find((button) => button.textContent === "Tools")
+    .click();
+
+  const toggle = findRow("detect_objects").querySelector("input");
+  toggle.checked = false;
+  toggle.dispatch("change", { target: toggle });
+  check(
+    "tool_config.dirty_state",
+    overlay.querySelector(".dialog-status").textContent.includes("Unsaved")
+  );
+
+  fetchCalls.length = 0;
+  overlay.querySelector(".dialog-actions .primary").click();
+  await tick();
+  await tick();
+
+  const put = fetchCalls.find((call) => call.method === "PUT");
+  check("tool_config.saved_scope", put && JSON.parse(put.body).scope === "global");
+  check(
+    "tool_config.saved_tool",
+    put && JSON.parse(put.body).config.disabled_tools.includes("detect_objects")
+  );
+  check(
+    "tool_config.updated_store",
+    store.state.tool_config.disabled_tools.includes("detect_objects")
+  );
+  check("tool_config.closed_after_save", !document.getElementById("overlay"));
+
+  // Cancel must not persist anything: reopening asks the server again and the
+  // row is back to its saved state.
+  saved = null;
+  store.state.tool_config = null;
+  toolConfig.openToolConfigDialog();
+  await tick();
+  await tick();
+  overlay = document.getElementById("overlay");
+  const reopened = overlay
+    .querySelectorAll(".tool-row")
+    .find((row) => row.textContent.includes("detect_objects"));
+  check(
+    "tool_config.cancel_reverts",
+    Boolean(reopened && reopened.querySelector("input").checked)
+  );
+
+  overlay
+    .querySelectorAll(".scope-switch button")
+    .find((button) => button.textContent.includes("workspace"))
+    .click();
+  check(
+    "tool_config.workspace_scope_note",
+    overlay
+      .querySelector(".tool-config-scope-note")
+      .textContent.includes("Saving creates tools.json")
+  );
+  const detectionSection = overlay
+    .querySelectorAll(".tool-category")
+    .find((section) => section.textContent.includes("Object detection"));
+  const master = detectionSection.querySelector(".tool-category-toggle");
+  master.checked = false;
+  master.dispatch("change", { target: master });
+  const afterMaster = overlay
+    .querySelectorAll(".tool-row")
+    .find((row) => row.textContent.includes("detect_objects"));
+  check(
+    "tool_config.category_master",
+    Boolean(afterMaster && !afterMaster.querySelector("input").checked)
+  );
+
+  fetchCalls.length = 0;
+  overlay.querySelector(".dialog-actions .primary").click();
+  await tick();
+  await tick();
+  const workspacePut = fetchCalls.find((call) => call.method === "PUT");
+  check(
+    "tool_config.workspace_scope_saved",
+    workspacePut && JSON.parse(workspacePut.body).scope === "workspace"
+  );
+  check(
+    "tool_config.workspace_scope_tool",
+    workspacePut &&
+      JSON.parse(workspacePut.body).config.disabled_tools.includes("detect_objects")
+  );
+
+  store.state.active_workspace = null;
+  fetchResponder = () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({}),
+  });
+});
+
+await scenario("shortcut", async () => {
+  const store = await import(webUrl("store.js"));
+  store.state.active_workspace = "demo";
+  store.state.cells = [{ id: "p1", kind: "prompt", source: "" }];
+
+  const cell = document.createElement("div");
+  cell.className = "cell";
+  cell.setAttribute("data-cell-id", "p1");
+  const editor = document.createElement("textarea");
+  editor.value = "find the ships";
+  cell.append(editor);
+  document.body.append(cell);
+  document.activeElement = editor;
+
+  fetchCalls.length = 0;
+  fetchResponder = () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({}),
+  });
+  for (const handler of documentListeners.get("keydown") || []) {
+    handler({
+      key: "Enter",
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault() {},
+    });
+  }
+  await tick();
+  await tick();
+
+  eq(
+    "shortcut.persists_then_runs",
+    fetchCalls.map((call) => [call.method, call.url]),
+    [
+      ["PUT", "/api/cells/p1"],
+      ["POST", "/api/cells/p1/run"],
+    ]
+  );
+  eq(
+    "shortcut.saves_the_typed_prompt",
+    JSON.parse(fetchCalls[0].body),
+    { source: "find the ships" }
+  );
+  eq("shortcut.updates_local_source", store.state.cells[0].source, "find the ships");
+
+  document.activeElement = null;
+  cell.remove();
+  const scroll = await import(webUrl("scroll.js"));
+  scroll.unfollow();
+});
+
+await scenario("map_capture", async () => {
+  const store = await import(webUrl("store.js"));
+  const source = eventSources.filter((item) => !item.closed && item.url === "/api/events").pop();
+  store.state.active_workspace = "ws1";
+  fetchCalls.length = 0;
+
+  source.emit(
+    "map_capture",
+    JSON.stringify({ id: "c1", token: "t1", workspace: "ws2" })
+  );
+  source.emit(
+    "map_bridge",
+    JSON.stringify({
+      id: "b1",
+      token: "t1",
+      workspace: "ws2",
+      method: "getDrawnFeatures",
+      params: {},
+    })
+  );
+  await tick();
+
+  eq(
+    "map.capture_other_workspace_is_silent",
+    fetchCalls.filter((call) => call.url.startsWith("/api/map/capture")).length,
+    0
+  );
+  eq(
+    "map.bridge_other_workspace_is_silent",
+    fetchCalls.filter((call) => call.url.startsWith("/api/map/bridge")).length,
+    0
+  );
+
+  store.state.map_project = { layers: [{ id: "keep" }] };
+  store.state.map_revision = 3;
+  source.emit(
+    "map",
+    JSON.stringify({
+      workspace: "ws2",
+      revision: 99,
+      project: { layers: [{ id: "old" }] },
+    })
+  );
+  await tick();
+  eq("map.ignores_other_workspace_map", store.state.map_project, {
+    layers: [{ id: "keep" }],
+  });
+  eq("map.ignores_other_workspace_revision", store.state.map_revision, 3);
+
+  source.emit(
+    "map",
+    JSON.stringify({
+      workspace: "ws1",
+      revision: 4,
+      project: { layers: [{ id: "server" }] },
+    })
+  );
+  await tick();
+  eq("map.accepts_own_workspace_map", store.state.map_project, {
+    layers: [{ id: "server" }],
+  });
+  eq("map.accepts_own_workspace_revision", store.state.map_revision, 4);
+});
 
 await scenario("map", async () => {
   const store = await import(webUrl("store.js"));
@@ -846,6 +1339,22 @@ await scenario("map", async () => {
   posted.length = 0;
   sendMessage(ORIGIN, iframe.contentWindow, {
     type: "geolibre:state",
+    seq: 0,
+    project: { layers: [], view: { center: [1, 1] } },
+  });
+  await tick();
+  eq("map.ignores_stale_child_state", fetchCalls.filter((call) => call.url === "/api/map/project").length, 0);
+  eq(
+    "map.stale_state_does_not_replace_project",
+    store.state.map_project,
+    { view: { center: [0, 0] }, layers: [{ id: "a" }] }
+  );
+
+  fetchCalls.length = 0;
+  posted.length = 0;
+  sendMessage(ORIGIN, iframe.contentWindow, {
+    type: "geolibre:state",
+    seq: 1,
     project: { layers: [{ id: "a" }], view: { center: [0, 0] } },
   });
   await tick();
@@ -879,6 +1388,49 @@ await scenario("map", async () => {
   sendMessage(ORIGIN, replacement.contentWindow, { type: "geolibre:error", message: "boom" });
   const errorNode = document.getElementById("map-error");
   eq("map.error_surface", [errorNode.style.display, errorNode.textContent], ["block", "Map error: boom"]);
+
+  // A push started in one workspace must not land after a switch.
+  sendMessage(ORIGIN, replacement.contentWindow, { type: "geolibre:ready", version: "1.2" });
+  await tick();
+  store.state.map_revision = 1;
+  let releasePush;
+  fetchResponder = () =>
+    new Promise((resolve) => {
+      releasePush = () =>
+        resolve({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            accepted: false,
+            workspace: "ws2",
+            revision: 9,
+            project: { layers: [{ id: "old" }] },
+          }),
+        });
+    });
+  fetchCalls.length = 0;
+  sendMessage(ORIGIN, replacement.contentWindow, {
+    type: "geolibre:state",
+    seq: 1,
+    project: { layers: [{ id: "from-iframe" }] },
+  });
+  await tick();
+  check(
+    "map.push_started",
+    fetchCalls.filter((call) => call.url === "/api/map/project").length === 1,
+    JSON.stringify(fetchCalls)
+  );
+  store.state.active_workspace = "ws3";
+  store.state.map_revision = 0;
+  store.state.map_project = { layers: [{ id: "ws3" }] };
+  releasePush();
+  await tick();
+  await tick();
+  eq("map.ignores_push_response_from_old_workspace", store.state.map_project, {
+    layers: [{ id: "ws3" }],
+  });
+  eq("map.keeps_new_workspace_revision", store.state.map_revision, 0);
 });
 
 await scenario("scroll", async () => {
@@ -1018,6 +1570,15 @@ class FrontendCoreTests(unittest.TestCase):
 
     def test_map_bridge(self) -> None:
         self.assert_group("map.")
+
+    def test_cells(self) -> None:
+        self.assert_group("cells.")
+
+    def test_tool_configuration_dialog(self) -> None:
+        self.assert_group("tool_config.")
+
+    def test_run_shortcut(self) -> None:
+        self.assert_group("shortcut.")
 
     def test_scroll_following(self) -> None:
         self.assert_group("scroll.")

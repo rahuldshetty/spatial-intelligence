@@ -87,6 +87,14 @@ geoai = [
 [project.scripts]
 spatial-intelligence = "spatial_intelligence.server:run"
 
+# What CI and an editable checkout need to run the checks. Installed by
+# `uv sync` (the default group) and intentionally outside the runtime package.
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.17,<0.18",
+]
+
 [tool.setuptools.packages.find]
 include = ["spatial_intelligence*"]
 
@@ -99,6 +107,11 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "B"]
 ignore = ["B008"]
+
+[tool.pytest.ini_options]
+# The suite is unittest-based; pytest is the runner CI uses for its reporting
+# and filtering, and `tests/` is the only place tests live.
+testpaths = ["tests"]
 
 [tool.setuptools.package-data]
 spatial_intelligence = ["web/**/*", "skills/**/*"]

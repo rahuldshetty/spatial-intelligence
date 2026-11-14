@@ -12,7 +12,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolRetu
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from spatial_intelligence.contracts.effects import Effect
-from spatial_intelligence.tools import ToolKind, ToolRegistry, ToolRuntime, pack, tool
+from spatial_intelligence.tools import ToolKind, ToolRegistry, ToolRuntime
 from spatial_intelligence.workspace import Workspace
 
 MODULE_SOURCE = """

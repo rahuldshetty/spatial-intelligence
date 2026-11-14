@@ -1396,6 +1396,9 @@ class ScenarioCase(unittest.TestCase):
             cwd=cls.root,
             capture_output=True,
             text=True,
+            # node emits UTF-8; without this Windows decodes the JSON with the
+            # ANSI code page and every · and ↑ arrives mojibaked.
+            encoding="utf-8",
             timeout=120,
         )
         if completed.returncode != 0:

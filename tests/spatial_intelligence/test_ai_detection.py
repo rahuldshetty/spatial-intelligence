@@ -118,7 +118,7 @@ class DecodeTestCase(unittest.TestCase):
         self.assertEqual(found[0].label, "car")
         self.assertEqual(found[0].class_id, 2)
         self.assertAlmostEqual(found[0].score, 0.9, places=4)
-        for actual, expected in zip(found[0].box, (0.4, 0.4, 0.6, 0.6)):
+        for actual, expected in zip(found[0].box, (0.4, 0.4, 0.6, 0.6), strict=True):
             self.assertAlmostEqual(actual, expected, places=5)
 
     def test_the_reserved_slot_is_not_a_class(self):
@@ -228,16 +228,16 @@ class CrossTileTestCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.workspace = Workspace(Path(self._tmp.name) / "workspace").create()
-        rng = np.random.default_rng(11)
+        self.path = "data/scene.tif"
+        rng = np.random.default_rng(7)
         rgb = rng.integers(40, 220, size=(SIZE, SIZE, 3), dtype=np.uint8)
-        target = self.workspace.resolve("data/scene.tif", write=True)
+        target = self.workspace.resolve(self.path, write=True)
         target.parent.mkdir(parents=True, exist_ok=True)
         with rasterio.open(
             target, "w", driver="GTiff", width=SIZE, height=SIZE, count=3, dtype="uint8",
             crs="EPSG:32645", transform=from_origin(500_000, 3_000_000, 1, 1),
         ) as dataset:
             dataset.write(np.transpose(rgb, (2, 0, 1)))
-        self.path = "data/scene.tif"
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -271,22 +271,6 @@ class CrossTileTestCase(unittest.TestCase):
         )
 
         self.assertEqual(kept, [0, 2, 3])
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.workspace = Workspace(Path(self._tmp.name) / "workspace").create()
-        self.path = "data/scene.tif"
-        rng = np.random.default_rng(7)
-        rgb = rng.integers(40, 220, size=(SIZE, SIZE, 3), dtype=np.uint8)
-        target = self.workspace.resolve(self.path, write=True)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(
-            target, "w", driver="GTiff", width=SIZE, height=SIZE, count=3, dtype="uint8",
-            crs="EPSG:32645", transform=from_origin(500_000, 3_000_000, 1, 1),
-        ) as dataset:
-            dataset.write(np.transpose(rgb, (2, 0, 1)))
-
-    def tearDown(self):
-        self._tmp.cleanup()
 
     def test_a_detection_lands_on_the_ground_it_boxed(self):
         # Centre of the canvas, a tenth of the canvas wide. The spec resizes

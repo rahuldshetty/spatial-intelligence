@@ -568,7 +568,7 @@ class RasterAnalysisTests(RasterTestCase):
     def test_hillshade_of_a_flat_dem_is_the_altitude_term(self):
         self.write_grid("data/flat.tif", np.full((4, 4), 100.0, dtype="float32"))
 
-        written = raster.hillshade(self.workspace, "data/flat.tif", "results/flat-shade.tif")
+        raster.hillshade(self.workspace, "data/flat.tif", "results/flat-shade.tif")
         values, ds = self.read_band("results/flat-shade.tif")
 
         self.assertEqual(ds.dtypes[0], "uint8")

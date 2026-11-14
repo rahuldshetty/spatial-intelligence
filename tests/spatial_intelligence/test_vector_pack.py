@@ -872,9 +872,9 @@ class VectorAnalysisTests(VectorTestCase):
         )
 
         self.assertEqual(sorted(counted.columns), ["count", "geometry", "zone"])
-        self.assertEqual(dict(zip(counted["zone"], counted["count"])), {"N": 2, "S": 2})
-        self.assertAlmostEqual(dict(zip(summed["zone"], summed["value_sum"]))["N"], 3.0)
-        self.assertAlmostEqual(dict(zip(summed["zone"], summed["value_sum"]))["S"], 7.0)
+        self.assertEqual(dict(zip(counted["zone"], counted["count"], strict=True)), {"N": 2, "S": 2})
+        self.assertAlmostEqual(dict(zip(summed["zone"], summed["value_sum"], strict=True))["N"], 3.0)
+        self.assertAlmostEqual(dict(zip(summed["zone"], summed["value_sum"], strict=True))["S"], 7.0)
 
     def test_aggregate_rejects_an_unknown_statistic_and_a_missing_field(self):
         with self.assertRaises(ToolInputError):

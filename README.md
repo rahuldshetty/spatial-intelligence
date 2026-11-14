@@ -218,9 +218,18 @@ or `data/` only.
 ## 🛠️ Development
 
 ```bash
-make test      # python -m unittest discover -s tests -t . -p "test_*.py"
+make venv      # editable install plus the `dev` group (pytest, ruff)
+make lint      # ruff check .
+make test      # pytest -q, the same suite CI runs
+make check     # lint and test
 make release   # AppImage build (Docker); see packaging/README.md
 ```
+
+CI (`.github/workflows/ci.yml`) runs on pull requests: `ruff check` and the
+pytest suite on Python 3.11 and 3.12. GitHub's default "Require approval for
+first-time contributors" setting holds a first-time contributor's run until a
+maintainer approves it. Maintainers can also start the pipeline by hand from
+Actions → CI → Run workflow.
 
 ```
 spatial_intelligence/

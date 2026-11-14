@@ -1540,6 +1540,9 @@ class FrontendCoreTests(unittest.TestCase):
                 [str(NODE), str(script), str(ROOT)],
                 capture_output=True,
                 text=True,
+                # node emits UTF-8; decode it explicitly so a Windows ANSI
+                # code page cannot mojibake the report.
+                encoding="utf-8",
                 timeout=180,
             )
         if completed.returncode != 0:

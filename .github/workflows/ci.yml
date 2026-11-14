@@ -1,0 +1,89 @@
+name: CI
+
+# Pull requests trigger this automatically. GitHub itself holds runs from
+# first-time contributors until a maintainer approves them (Settings -> Actions
+# -> General -> "Require approval for first-time contributors"; that is the
+# default for public repositories). Maintainers can also run it by hand from
+# Actions -> CI -> Run workflow.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live run per branch/PR; a new push cancels the old one.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-progress
+
+      - name: Ruff
+        run: uv run --no-sync ruff check .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject declares requires-python >= 3.11 and the lock resolves for
+        # both, so both are worth a run.
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The frontend tests load the real ES modules with node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # orthority pulls the GUI OpenCV wheel, whose import needs libGL; without
+      # it the drone tests fail at import instead of running or skipping.
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-progress
+
+      - name: Pytest
+        run: uv run --no-sync pytest -q
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-failures-${{ matrix.python-version }}
+          path: |
+            .pytest_cache/v/cache/lastfailed
+            tests/**/*.log
+          if-no-files-found: ignore

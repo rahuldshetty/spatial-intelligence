@@ -289,9 +289,12 @@ class EnvTests(DataRootTestCase):
     def test_validate_env_still_refuses_when_neither_source_has_the_key(self):
         (self.home / ".env").write_text("GEOAI_MODEL=openai:gpt-4o\n", encoding="utf-8")
         os.environ.pop("OPENAI_API_KEY", None)
-
-        with self.assertRaises(SystemExit) as caught:
-            env.validate_env()
+        # A custom endpoint makes the key optional, and a developer's shell may
+        # export one; this test is about the key being absent. An empty value is
+        # patched rather than popped so the environment is restored afterwards.
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": ""}):
+            with self.assertRaises(SystemExit) as caught:
+                env.validate_env()
 
         self.assertIn("OPENAI_API_KEY", str(caught.exception))
         self.assertIn(str(self.home / ".env"), str(caught.exception))

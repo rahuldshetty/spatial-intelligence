@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from ...contracts.errors import ToolInputError
 from ...contracts.services import CONVERSATION_SERVICE
-from ...workspace.conversation import ConversationStore, query_terms
+from ...workspace.conversation import ConversationStore, search_terms
 from ..runtime import ToolRuntime
 from ..spec import pack, tool
 
 #: Results one call may return.
-MAX_RESULTS = 20
+MAX_RESULTS = 30
 
 
 @pack(category="conversation", core=True)
@@ -18,6 +18,8 @@ class ConversationPack:
 
     def __init__(self, runtime: ToolRuntime) -> None:
         self._rt = runtime
+        self._run: str | None = None
+        self._cache: dict[tuple[tuple[str, ...], int], dict] = {}
 
     def _store(self) -> ConversationStore | None:
         return self._rt.services.get(CONVERSATION_SERVICE)
@@ -26,7 +28,7 @@ class ConversationPack:
         core=True,
         summary="Search earlier prompts, tool calls, and results in this workspace",
     )
-    def search_conversation_history(self, query: str, max_results: int = 6) -> dict:
+    def search_conversation_history(self, terms: list[str], max_results: int = 10) -> dict:
         """Search the workspace's earlier prompt cells for relevant context.
 
         Call this only when the current request refers back to earlier work —
@@ -35,29 +37,45 @@ class ConversationPack:
         call it on every turn: the live notebook already carries the visible
         conversation, so searching is for context that is no longer in view.
 
-        ``query`` should use distinctive terms (a place, dataset, tool, index,
-        file name, or number) rather than a whole sentence. Each hit names the
-        prompt cell, the trace step it came from, and a short excerpt.
+        Generate ``terms`` from the request: 2–6 distinctive search phrases,
+        most specific first. A phrase may be several words ("north field NDVI",
+        "Sentinel-1 2024") or a single identifier ("results/ndvi.tif", "0.62").
+        Use the place, dataset, tool, index, file, or parameter the request
+        names; do not pad the list with filler words. Multi-word phrases match
+        adjacent terms; single words match prefixes. One hit per earlier prompt
+        is returned.
 
-        Returns ``query``, ``terms``, ``count``, and ``results``. A result has
-        ``reference``, ``cell_id``, ``prompt_id``, ``run_id``, ``kind``
-        (``prompt``, ``assistant``, ``tool_call``, ``tool_result``,
-        ``response``, or ``error``),
-        ``step_index``, ``tool_name``, ``hint``, ``prompt``, and ``answer``.
+        Returns ``query`` (the terms joined for display), ``terms``, ``count``,
+        and ``results``. A result has ``reference``, ``cell_id``, ``prompt_id``,
+        ``run_id``, ``kind`` (``prompt``, ``assistant``, ``tool_call``,
+        ``tool_result``, ``response``, or ``error``), ``step_index``,
+        ``tool_name``, ``hint``, ``result`` (the matching tool result for a
+        ``tool_call``), ``prompt``, ``answer``, and ``created_at``.
         """
-        text = (query or "").strip()
-        if not text:
-            raise ToolInputError("query must not be empty")
+        cleaned = search_terms(terms)
+        if not cleaned:
+            raise ToolInputError("terms must not be empty")
         try:
             limit = max(1, min(MAX_RESULTS, int(max_results)))
         except (TypeError, ValueError):
-            limit = 6
+            limit = 10
+        run = self._rt.run_id
+        if run != self._run:
+            self._run = run
+            self._cache.clear()
+        key = (tuple(term.casefold() for term in cleaned), limit)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
         store = self._store()
-        terms = query_terms(text)
-        hits = store.search(text, limit=limit) if store is not None else []
+        hits = (
+            store.search(cleaned, limit=limit, exclude_cell=run)
+            if store is not None
+            else []
+        )
         payload = {
-            "query": text,
-            "terms": terms,
+            "query": " · ".join(cleaned),
+            "terms": cleaned,
             "count": len(hits),
             "results": hits,
             "note": (
@@ -71,6 +89,7 @@ class ConversationPack:
                 )
             ),
         }
+        self._cache[key] = payload
         self._rt.events.notify_recall(self._rt.run_id, payload)
         return payload
 

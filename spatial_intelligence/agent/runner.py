@@ -30,6 +30,7 @@ from pydantic_ai_harness.planning import InMemoryPlanStore, PlanItem
 from ..contracts.ids import new_id
 from ..tools.registry import ToolRegistry
 from ..workspace import traces
+from ..workspace.conversation import SEARCH_TOOL
 from .events import step_from_event
 from .interactions import interaction_from_deferred
 
@@ -401,6 +402,7 @@ class PromptRunner:
     ) -> None:
         """Append one streamed step to the trace, the file, and the notebook."""
         hooks = self.hooks
+        step = self._trace_step(step)
         tool_call_id = step.get("tool_call_id")
         # A resumed run re-emits the deferred tool call it is answering; that
         # step is already in the trace, so only its (new) result is appended.
@@ -429,6 +431,22 @@ class PromptRunner:
             recorded = recorded_tools.get(tool_call_id)
             if recorded is not None:
                 hooks.record_tool_result(recorded, step)
+
+    @staticmethod
+    def _trace_step(step: dict) -> dict:
+        """Keep the full recall hits out of the trace; its own step shows them."""
+        if step.get("type") != "tool_result" or step.get("name") != SEARCH_TOOL:
+            return step
+        content = step.get("content")
+        content = content if isinstance(content, dict) else {}
+        return {
+            **step,
+            "content": {
+                "query": content.get("query"),
+                "count": content.get("count"),
+                "note": "Hits are shown in the history recall step.",
+            },
+        }
 
     async def _plan_step(self, plan_store: InMemoryPlanStore) -> dict:
         items = [item.model_dump(mode="json") for item in await plan_store.get_items()]

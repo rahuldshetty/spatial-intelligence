@@ -16,11 +16,12 @@ from spatial_intelligence.contracts.services import CONVERSATION_SERVICE
 from spatial_intelligence.tools.packs.conversation import ConversationPack
 from spatial_intelligence.tools.registry import ToolRegistry
 from spatial_intelligence.tools.runtime import RuntimeEvents, ToolRuntime
-from spatial_intelligence.workspace import Workspace
+from spatial_intelligence.workspace import Workspace, traces
 from spatial_intelligence.workspace.conversation import (
     MAX_UNIT_CHARS,
+    SEARCH_TOOL,
     ConversationStore,
-    query_terms,
+    search_terms,
 )
 
 from .support import answered_tools, scripted, stream_model
@@ -101,18 +102,21 @@ class ConversationStoreTests(unittest.TestCase):
 
         self.assertEqual(self.store.unit_count("c1"), 4)
 
-        hits = self.store.search("NDVI")
-        kinds = {hit["kind"] for hit in hits}
-        self.assertEqual(kinds, {"prompt", "tool_call", "tool_result", "response"})
-        prompt_hit = next(hit for hit in hits if hit["kind"] == "prompt")
-        for hit in hits:
-            self.assertEqual(hit["cell_id"], "c1")
-            self.assertEqual(hit["run_id"], "r1")
-            self.assertEqual(hit["prompt_id"], prompt_hit["prompt_id"])
-        call_hit = next(hit for hit in hits if hit["kind"] == "tool_call")
+        prompt_hit = self.store.search("Compute")[0]
+        self.assertEqual(prompt_hit["kind"], "prompt")
+        call_hit = self.store.search("called")[0]
+        self.assertEqual(call_hit["kind"], "tool_call")
         self.assertEqual(call_hit["step_index"], 2)
         self.assertEqual(call_hit["tool_name"], "spectral_index")
         self.assertIn("spectral_index", call_hit["reference"])
+        self.assertIn("wrote results/ndvi.tif", call_hit["result"])
+        self.assertEqual(prompt_hit["answer"], "Mean NDVI was 0.62")
+        self.assertEqual(self.store.search("wrote")[0]["kind"], "tool_result")
+        self.assertEqual(self.store.search("Mean")[0]["kind"], "response")
+        for hit in (prompt_hit, call_hit):
+            self.assertEqual(hit["cell_id"], "c1")
+            self.assertEqual(hit["run_id"], "r1")
+            self.assertEqual(hit["prompt_id"], prompt_hit["prompt_id"])
 
         # The reasoning delta was not indexed.
         self.assertEqual(self.store.search("inspect"), [])
@@ -139,7 +143,7 @@ class ConversationStoreTests(unittest.TestCase):
         self.store.index_result("c1", "done", "The answer is 0.62.", None)
 
         blocks = [
-            hit for hit in self.store.search("raster bands NDVI")
+            hit for hit in self.store.search(["raster", "bands", "NDVI"])
             if hit["kind"] == "assistant"
         ]
         self.assertEqual(len(blocks), 1)
@@ -162,10 +166,32 @@ class ConversationStoreTests(unittest.TestCase):
         self.store.index_result("c1", "stopped", None, None)
 
         self.assertEqual(self.store.search("secret"), [])
-        self.assertEqual(
-            [hit["kind"] for hit in self.store.search("visible")],
-            ["assistant", "assistant"],
+        self.assertEqual(self.store.unit_count("c1"), 3)
+        self.assertEqual([hit["kind"] for hit in self.store.search("visible")], ["assistant"])
+        self.assertEqual(self.store.search("one")[0]["step_index"], 0)
+        self.assertEqual(self.store.search("two")[0]["step_index"], 2)
+
+    def test_a_hit_uses_its_own_runs_prompt_and_answer(self):
+        self.store.begin_run("c1", "r1", "first run with NDVI")
+        self.store.index_step(
+            "c1",
+            {
+                "type": "tool_result",
+                "name": "spectral_index",
+                "content": "first detail",
+                "tool_call_id": "t1",
+            },
+            1,
         )
+        self.store.index_result("c1", "done", "first answer", None)
+        self.store.index_resume("c1", "r2", {"choice": "yes"})
+        self.store.index_result("c1", "done", "second answer", None)
+
+        hit = self.store.search(["first detail"])[0]
+
+        self.assertEqual(hit["run_id"], "r1")
+        self.assertEqual(hit["prompt"], "first run with NDVI")
+        self.assertEqual(hit["answer"], "first answer")
 
     def test_a_rerun_replaces_the_cells_rows(self):
         self.store.begin_run("c1", "r1", "first attempt with NDVI")
@@ -208,8 +234,101 @@ class ConversationStoreTests(unittest.TestCase):
         self.assertEqual(len(hits), 1)
         self.assertLessEqual(len(hits[0]["hint"]), MAX_UNIT_CHARS)
 
-    def test_query_terms_are_unique_and_bounded(self):
-        self.assertEqual(query_terms("NDVI, ndvi and north"), ["NDVI", "and", "north"])
+    def test_search_terms_are_normalized_without_splitting(self):
+        self.assertEqual(
+            search_terms(["  north field ", "NDVI", "", "north field", '"quoted"']),
+            ["north field", "NDVI", "quoted"],
+        )
+        self.assertEqual(search_terms("north field"), ["north field"])
+
+    def test_the_running_cell_is_not_returned(self):
+        self.store.begin_run("c0", "r0", "NDVI over the north field")
+        self.store.begin_run("c1", "r1", "NDVI over the north field")
+
+        hits = self.store.search(["NDVI", "north field"], exclude_cell="c1")
+
+        self.assertEqual([hit["cell_id"] for hit in hits], ["c0"])
+
+    def test_recall_tool_calls_and_results_are_not_indexed(self):
+        self.store.begin_run("c1", "r1", "what did we compute?")
+        self.store.index_step(
+            "c1",
+            {
+                "type": "tool_call",
+                "name": SEARCH_TOOL,
+                "args": {"query": "wombat survey"},
+                "tool_call_id": "t1",
+            },
+            1,
+        )
+        self.store.index_step(
+            "c1",
+            {
+                "type": "tool_result",
+                "name": SEARCH_TOOL,
+                "content": {"results": [{"hint": "wombat survey"}]},
+                "tool_call_id": "t1",
+            },
+            2,
+        )
+
+        self.assertEqual(self.store.unit_count("c1"), 1)
+        self.assertEqual(self.store.search("wombat"), [])
+
+    def test_results_are_one_hit_per_cell(self):
+        self.store.begin_run("c1", "r1", "NDVI over the north field")
+        self.store.index_step(
+            "c1",
+            {
+                "type": "tool_result",
+                "name": "raster_info",
+                "content": "NDVI raster",
+                "tool_call_id": "t1",
+            },
+            1,
+        )
+        self.store.index_result("c1", "done", "NDVI mean", None)
+        self.store.begin_run("c2", "r2", "NDVI over the south field")
+
+        hits = self.store.search("NDVI", limit=5)
+
+        self.assertEqual({hit["cell_id"] for hit in hits}, {"c1", "c2"})
+        self.assertEqual(len(hits), 2)
+
+    def test_a_multi_word_term_matches_as_a_phrase(self):
+        self.store.begin_run("c1", "r1", "NDVI over the north field")
+        self.store.begin_run("c2", "r2", "NDVI over the south field")
+
+        hits = self.store.search(["north field"])
+
+        self.assertEqual([hit["cell_id"] for hit in hits], ["c1"])
+
+    def test_trace_backfill_indexes_cells_without_rows(self):
+        path = self.workspace.traces / "legacy.jsonl"
+        traces.write_run(
+            path,
+            cell_id="legacy",
+            run_id="r0",
+            model="test",
+            prompt="Remember the wombat survey",
+        )
+        traces.append_step(
+            path,
+            {
+                "type": "tool_result",
+                "name": "read_file",
+                "content": "wombat habitat",
+                "tool_call_id": "t1",
+            },
+        )
+        traces.append_result(path, status="done", output="wombat survey noted")
+
+        self.assertEqual(self.store.rebuild_missing(self.workspace.traces), 1)
+
+        hit = self.store.search("wombat")[0]
+        self.assertEqual(hit["cell_id"], "legacy")
+        self.assertEqual(hit["answer"], "wombat survey noted")
+        self.assertEqual(self.store.rebuild_missing(self.workspace.traces), 0)
 
 
 class ConversationToolTests(unittest.TestCase):
@@ -239,23 +358,41 @@ class ConversationToolTests(unittest.TestCase):
         self.store.begin_run("c0", "r0", "Compute NDVI over the north field")
         self.store.index_result("c0", "done", "Mean NDVI was 0.62", None)
 
-        result = self.tool.callable(query="NDVI mean", max_results=3)
+        result = self.tool.callable(terms=["NDVI", "mean"], max_results=3)
 
-        self.assertEqual(result["query"], "NDVI mean")
+        self.assertEqual(result["query"], "NDVI · mean")
         self.assertEqual(result["count"], len(result["results"]))
         self.assertGreaterEqual(result["count"], 1)
         self.assertIn("NDVI", result["terms"])
         self.assertEqual(self.recalls[0][0], "c1")
         self.assertEqual(self.recalls[0][1]["count"], result["count"])
 
-    def test_an_empty_query_is_rejected(self):
-        with self.assertRaises(ToolInputError):
-            self.tool.callable(query="   ")
+    def test_a_repeated_query_reuses_the_same_recall(self):
+        self.store.begin_run("c0", "r0", "Compute NDVI over the north field")
+
+        first = self.tool.callable(terms=["NDVI", "mean"])
+        second = self.tool.callable(terms=["NDVI", "mean"])
+
+        self.assertIs(second, first)
+        self.assertEqual(len(self.recalls), 1)
+
+    def test_the_tool_does_not_return_the_running_cell(self):
+        self.store.begin_run("c1", "r1", "NDVI over the north field")
+        self.store.begin_run("c0", "r0", "NDVI over the south field")
+
+        result = self.tool.callable(terms=["NDVI", "field"])
+
+        self.assertEqual([hit["cell_id"] for hit in result["results"]], ["c0"])
+
+    def test_an_empty_term_list_is_rejected(self):
+        for terms in ([], ["   "]):
+            with self.assertRaises(ToolInputError):
+                self.tool.callable(terms=terms)
 
     def test_an_unavailable_store_still_answers_with_a_note(self):
         self.store.close()
 
-        result = self.tool.callable(query="NDVI")
+        result = self.tool.callable(terms=["NDVI"])
 
         self.assertEqual(result["count"], 0)
         self.assertIn("unavailable", result["note"])
@@ -279,7 +416,7 @@ def follow_up_model():
         yield {
             0: DeltaToolCall(
                 name="search_conversation_history",
-                json_args=json.dumps({"query": "wombat survey NDVI"}),
+                json_args=json.dumps({"terms": ["wombat survey", "NDVI"]}),
             )
         }
 
@@ -329,17 +466,18 @@ class ConversationSessionTests(SessionTestCase):
         cell = self.wait_for_status(state, second["id"], TERMINAL_STATUSES)
 
         recall = next(step for step in cell["trace"] if step["type"] == "recall")
-        self.assertEqual(recall["query"], "wombat survey NDVI")
-        self.assertIn("wombat", recall["terms"])
+        self.assertEqual(recall["query"], "wombat survey · NDVI")
+        self.assertEqual(recall["terms"], ["wombat survey", "NDVI"])
         self.assertTrue(recall["results"])
-        self.assertEqual(recall["results"][0]["cell_id"], first["id"])
-        self.assertTrue(
-            any(
-                step.get("type") == "tool_result"
-                and step.get("name") == "search_conversation_history"
-                for step in cell["trace"]
-            )
+        self.assertEqual({hit["cell_id"] for hit in recall["results"]}, {first["id"]})
+        result = next(
+            step
+            for step in cell["trace"]
+            if step.get("type") == "tool_result"
+            and step.get("name") == "search_conversation_history"
         )
+        self.assertNotIn("results", result["content"])
+        self.assertIn("history recall step", result["content"]["note"])
 
 
 if __name__ == "__main__":

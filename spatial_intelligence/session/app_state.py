@@ -309,11 +309,10 @@ class AppState:
         self.conversation.close()
 
     def _open_conversation(self, workspace) -> None:
-        """Open this workspace's history index, tolerating a bad database file.
+        """Open the history index and import trace files it has not seen.
 
-        The index is a convenience for follow-up questions, not part of the
-        workspace's own data: a corrupt or unwritable file must not make the
-        workspace impossible to open. The recall tool reports it unavailable.
+        A corrupt or unwritable file must not make the workspace impossible to
+        open; the recall tool then reports the index unavailable.
         """
         try:
             self.conversation.open_at(workspace.conversation_db)
@@ -321,6 +320,14 @@ class AppState:
             self.conversation.close()
             print(
                 f"spatial-intelligence: conversation index unavailable: {exc}",
+                file=sys.stderr,
+            )
+            return
+        try:
+            self.conversation.rebuild_missing(workspace.traces)
+        except (sqlite3.Error, OSError) as exc:
+            print(
+                f"spatial-intelligence: conversation index backfill failed: {exc}",
                 file=sys.stderr,
             )
 

@@ -296,6 +296,16 @@
   color: var(--text-3);
 }
 
+.recall-hit-detail {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
 .trace-step.pending > summary::after {
   content: "";
   margin-left: auto;

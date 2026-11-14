@@ -1080,8 +1080,10 @@ const scenarios = {
               kind: "tool_result",
               tool_name: "spectral_index",
               step_index: 4,
-              hint: "spectral_index result: wrote results/ndvi.tif",
+              hint: "spectral_index called with NDVI",
+              result: "wrote results/ndvi.tif",
               prompt: "Compute NDVI over the north field",
+              answer: "Mean NDVI was 0.62",
             },
           ],
         },
@@ -1694,10 +1696,11 @@ class RecallTraceTests(ScenarioCase):
         self.assertIn("NDVI north field", hit["text"])
         self.assertIn("NDVI", hit["text"])
         self.assertIn("spectral_index", hit["text"])
-        self.assertIn("wrote results/ndvi.tif", hit["text"])
+        self.assertIn("Result: wrote results/ndvi.tif", hit["text"])
         self.assertIn("prompt 7", hit["text"])
         self.assertIn("step 4", hit["text"])
         self.assertIn("Compute NDVI over the north field", hit["text"])
+        self.assertIn("Answer: Mean NDVI was 0.62", hit["text"])
 
         empty = rendered[1]
         self.assertIn("trace-recall", empty["class"])

@@ -154,8 +154,14 @@ function recallNode(step) {
       if (meta) head.append(el("span", { class: "recall-hit-meta", text: meta }));
       item.append(head);
       item.append(el("div", { class: "recall-hit-hint", text: hit.hint || "" }));
+      if (hit.result) {
+        item.append(el("div", { class: "recall-hit-detail", text: "Result: " + hit.result }));
+      }
       if (hit.prompt) {
         item.append(el("div", { class: "recall-hit-prompt", text: "Prompt: " + hit.prompt }));
+      }
+      if (hit.answer && hit.kind !== "response" && hit.kind !== "error") {
+        item.append(el("div", { class: "recall-hit-detail", text: "Answer: " + hit.answer }));
       }
       list.append(item);
     }

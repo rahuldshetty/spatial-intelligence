@@ -24,22 +24,31 @@ import json
 import re
 import sqlite3
 import threading
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .traces import read_trace
+
 #: Maximum characters one indexed unit keeps. A tool result can be a whole
 #: file; the index stores enough to find it, not a second copy of it.
-MAX_UNIT_CHARS = 120_000
+MAX_UNIT_CHARS = 20_000
 
 #: Maximum characters of a prompt/answer preview returned with a hit.
 PREVIEW_CHARS = 280
 
-#: Maximum number of terms taken from one query.
-MAX_QUERY_TERMS = 16
+#: Maximum terms one search may use.
+MAX_SEARCH_TERMS = 16
+
+#: Maximum characters one term keeps.
+MAX_TERM_CHARS = 200
 
 #: Tokens of surrounding text a hit shows.
 SNIPPET_TOKENS = 48
+
+#: The recall tool; its calls and hits are not conversation content.
+SEARCH_TOOL = "search_conversation_history"
 
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
 _WHITESPACE = re.compile(r"\s+")
@@ -50,19 +59,24 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def query_terms(query: str) -> list[str]:
-    """Split a natural-language query into unique search terms."""
+def search_terms(terms: Iterable[str] | str) -> list[str]:
+    """Normalize model-supplied search terms without splitting or filtering."""
+    values = [terms] if isinstance(terms, str) else list(terms)
     seen: set[str] = set()
-    terms: list[str] = []
-    for word in _WORD.findall(query or ""):
-        folded = word.casefold()
+    cleaned: list[str] = []
+    for raw in values:
+        term = _WHITESPACE.sub(" ", str(raw or "")).replace('"', "").strip()
+        term = term[:MAX_TERM_CHARS]
+        if not term:
+            continue
+        folded = term.casefold()
         if folded in seen:
             continue
         seen.add(folded)
-        terms.append(word)
-        if len(terms) >= MAX_QUERY_TERMS:
+        cleaned.append(term)
+        if len(cleaned) >= MAX_SEARCH_TERMS:
             break
-    return terms
+    return cleaned
 
 
 def _clean(value: Any) -> str:
@@ -281,6 +295,8 @@ class ConversationStore:
                 self._index_text(cell_id, conn, step, kind, step_index)
                 return
             self._flush_text(cell_id, conn)
+            if step.get("name") == SEARCH_TOOL:
+                return
             parsed = _step_text(step)
             if parsed is None:
                 return
@@ -420,44 +436,127 @@ class ConversationStore:
             with conn:
                 conn.execute("DELETE FROM conversation_units WHERE cell_id=?", (cell_id,))
 
+    def indexed_cells(self) -> set[str]:
+        """Return the cell ids that already have indexed rows."""
+        with self._lock:
+            conn = self._conn
+            if conn is None:
+                return set()
+            rows = conn.execute("SELECT DISTINCT cell_id FROM conversation_units")
+            return {str(row[0]) for row in rows}
+
+    def rebuild_missing(self, traces_dir: str | Path) -> int:
+        """Index trace files whose cell has no rows yet; return how many."""
+        known = self.indexed_cells()
+        imported = 0
+        for path in sorted(Path(traces_dir).glob("*.jsonl")):
+            cell_id = path.stem
+            if cell_id in known:
+                continue
+            loaded = read_trace(path, include_messages=False)
+            prompt = loaded.get("prompt")
+            run_id = loaded.get("run_id")
+            if not prompt or not run_id:
+                continue
+            self.begin_run(cell_id, str(run_id), prompt)
+            for index, step in enumerate(loaded.get("steps") or []):
+                if isinstance(step, dict):
+                    self.index_step(cell_id, step, index)
+            status = loaded.get("status")
+            if status:
+                self.index_result(
+                    cell_id, str(status), loaded.get("output"), loaded.get("error")
+                )
+            imported += 1
+        with self._lock:
+            self._active.clear()
+            self._pending_text.clear()
+        return imported
+
     # -- reads -----------------------------------------------------------
 
-    def search(self, query: str, limit: int = 6) -> list[dict[str, Any]]:
-        """Return the best matching units, ranked by BM25 (lower is better)."""
-        terms = query_terms(query)
-        if not terms:
+    def search(
+        self,
+        terms: Iterable[str] | str,
+        limit: int = 6,
+        *,
+        exclude_cell: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the best matching unit per prompt cell, ranked by BM25."""
+        cleaned = search_terms(terms)
+        if not cleaned:
             return []
-        match = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
+
+        def match_term(term: str) -> str:
+            words = _WORD.findall(term)
+            if len(words) > 1:
+                return '"' + term.replace('"', '""') + '"'
+            return words[0].casefold() + "*" if words else ""
+
+        match = " OR ".join(part for term in cleaned if (part := match_term(term)))
+        if not match:
+            return []
+        wanted = max(1, int(limit))
+        candidates = max(8, min(80, wanted * 4))
         with self._lock:
             conn = self._conn
             if conn is None:
                 return []
+            active = self._active.get(exclude_cell) if exclude_cell else None
+            exclude_run = active[1] if active else None
+            where = "conversation_fts MATCH ?"
+            params: list[Any] = [
+                SNIPPET_TOKENS,
+                PREVIEW_CHARS,
+                PREVIEW_CHARS,
+                PREVIEW_CHARS,
+                match,
+            ]
+            if exclude_run is not None:
+                where += " AND (u.run_id IS NULL OR u.run_id != ?)"
+                params.append(exclude_run)
+            params.append(candidates)
             rows = conn.execute(
-                """
+                f"""
                 SELECT u.id, u.cell_id, u.prompt_id, u.run_id, u.kind,
-                       u.step_index, u.step_id, u.tool_name,
+                       u.step_index, u.step_id, u.tool_name, u.created_at,
                        snippet(conversation_fts, 0, '', '', '…', ?) AS hint,
                        bm25(conversation_fts) AS score,
                        (SELECT substr(p.text, 1, ?) FROM conversation_units AS p
-                         WHERE p.cell_id = u.cell_id AND p.kind = 'prompt'
-                         ORDER BY p.id DESC LIMIT 1) AS prompt,
+                         WHERE p.id = u.prompt_id) AS prompt,
                        (SELECT substr(a.text, 1, ?) FROM conversation_units AS a
-                         WHERE a.cell_id = u.cell_id AND a.kind IN ('response', 'error')
-                         ORDER BY a.id DESC LIMIT 1) AS answer
+                         WHERE a.cell_id = u.cell_id AND a.run_id IS u.run_id
+                           AND a.kind IN ('response', 'error')
+                         ORDER BY a.id DESC LIMIT 1) AS answer,
+                       (SELECT substr(r.text, 1, ?) FROM conversation_units AS r
+                         WHERE u.kind = 'tool_call' AND r.cell_id = u.cell_id
+                           AND r.run_id IS u.run_id AND r.kind = 'tool_result'
+                           AND r.step_id = u.step_id
+                         ORDER BY r.id DESC LIMIT 1) AS result
                   FROM conversation_fts
                   JOIN conversation_units AS u ON u.id = conversation_fts.rowid
-                 WHERE conversation_fts MATCH ?
-                 ORDER BY score
+                 WHERE {where}
+                 ORDER BY score, u.id DESC
                  LIMIT ?
                 """,
-                (SNIPPET_TOKENS, PREVIEW_CHARS, PREVIEW_CHARS, match, max(1, int(limit))),
+                params,
             ).fetchall()
             hits: list[dict[str, Any]] = []
+            seen: set[str] = set()
             for row in rows:
+                cell_id = str(row["cell_id"])
+                if cell_id in seen:
+                    continue
+                seen.add(cell_id)
                 kind = row["kind"]
                 tool = row["tool_name"]
                 step = row["step_index"]
-                reference = f"prompt cell {row['cell_id']} · {kind}"
+                result = _clean(row["result"])
+                if result and tool:
+                    prefix = f"{tool} result: "
+                    if result.startswith(prefix):
+                        result = result[len(prefix) :]
+                reference = f"prompt cell {cell_id} · {kind}"
                 if tool:
                     reference = f"{reference} · {tool}"
                 if step is not None:
@@ -465,7 +564,7 @@ class ConversationStore:
                 hits.append(
                     {
                         "reference": reference,
-                        "cell_id": row["cell_id"],
+                        "cell_id": cell_id,
                         "prompt_id": row["prompt_id"],
                         "run_id": row["run_id"],
                         "kind": kind,
@@ -473,11 +572,15 @@ class ConversationStore:
                         "step_id": row["step_id"],
                         "tool_name": tool,
                         "hint": _clean(row["hint"]),
+                        "result": result,
                         "prompt": _clean(row["prompt"]),
                         "answer": _clean(row["answer"]),
+                        "created_at": row["created_at"],
                         "score": float(row["score"]),
                     }
                 )
+                if len(hits) >= wanted:
+                    break
             return hits
 
     def unit_count(self, cell_id: str | None = None) -> int:
@@ -498,8 +601,10 @@ class ConversationStore:
 
 __all__ = [
     "ConversationStore",
+    "MAX_SEARCH_TERMS",
     "MAX_UNIT_CHARS",
     "PREVIEW_CHARS",
+    "SEARCH_TOOL",
     "now_iso",
-    "query_terms",
+    "search_terms",
 ]

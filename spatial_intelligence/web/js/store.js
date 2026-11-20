@@ -28,6 +28,8 @@ export const state = {
   settings: { ...DEFAULT_SETTINGS },
   tool_config: null,
   tool_config_source: "global",
+  data_sources: null,
+  data_sources_source: "global",
   vision: null,
   running_cell: null,
 };
@@ -99,6 +101,8 @@ export function applySnapshot(snapshot) {
     settings: snap.settings || state.settings,
     tool_config: snap.tool_config || state.tool_config,
     tool_config_source: snap.tool_config_source || state.tool_config_source,
+    data_sources: snap.data_sources || state.data_sources,
+    data_sources_source: snap.data_sources_source || state.data_sources_source,
     vision: snap.vision != null ? snap.vision : state.vision,
     running_cell: snap.running_cell != null ? snap.running_cell : null,
   });

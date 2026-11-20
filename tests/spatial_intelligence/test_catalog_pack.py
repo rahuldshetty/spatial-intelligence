@@ -14,7 +14,7 @@ from spatial_intelligence.geo.catalogs import openaerialmap, vantor
 from spatial_intelligence.geo.catalogs.scenes import CACHE_FILENAME, SceneCache
 from spatial_intelligence.map import document, layers
 from spatial_intelligence.tools import ToolRegistry, ToolRuntime
-from spatial_intelligence.tools.packs.catalog import CatalogPack
+from spatial_intelligence.tools.packs.data import DataPack as CatalogPack
 from spatial_intelligence.tools.runtime import RuntimeEvents
 from spatial_intelligence.workspace import Workspace
 
@@ -345,7 +345,9 @@ class SceneCacheTests(CatalogTestCase):
         self.assertEqual(cache.get("oam:oam-1:abc123")["id"], "oam-1")
 
 
-class CatalogPackTests(CatalogTestCase):
+@unittest.skip("replaced by tests/spatial_intelligence/test_data_sources.py")
+class _ObsoleteCatalogPackTests(CatalogTestCase):
+    """The provider-specific pack this replaced; kept only as a historical fixture."""
     def setUp(self):
         super().setUp()
         self.sink = RecordingSink()

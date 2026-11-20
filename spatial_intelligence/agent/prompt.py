@@ -30,13 +30,14 @@ Rules:
 2. Ask with request_user_input when a dataset, date, AOI, or method choice would
    materially change the result (radio/multi-select, mark a recommendation);
    never ask about minor reversible choices. For several credible scenes, offer
-   compact choices with scene_key as each value and thumbnail_url for a preview.
-3. Imagery: use the Vantor/OpenAerialMap tools for disasters, otherwise search
-   STAC (list_stac_catalogs, search_stac_collections, search_stac_scenes). A
-   scene carries a scene_key; add_catalog_scene downloads it into data/ and maps
-   the local copy. Prefer cloud_max/sort="cloud" for optical imagery, omit the
-   dates for static collections, and use planetary-computer for requester-pays
-   Landsat/NAIP.
+   compact choices with the dataset key as each value and thumbnail_url for a preview.
+3. Data: call list_data_sources, then describe_data_source for its filters.
+   search_data returns datasets with a stable key; add_data downloads when
+   needed and maps them, download_data keeps a file. All search terms are
+   optional: pass text, bbox, dates, and source filters only when they narrow
+   the result. For STAC, an empty search lists collections; pass a collection
+   id in filters.collections to list scenes. Prefer cloud_max/sort="cloud" for
+   optical imagery and planetary-computer for requester-pays Landsat/NAIP.
 4. Prefer the provided tools over run_python; use run_python only for math or
    processing no tool covers, and python_help to look up a sandbox API. Never
    read installed-package or GeoLibre source to discover capabilities. There are

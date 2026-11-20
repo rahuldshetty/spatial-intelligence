@@ -42,20 +42,18 @@ jobs:
         run: uv run --no-sync ruff check .
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Test (Python 3.12)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # pyproject declares requires-python >= 3.11 and the lock resolves for
-        # both, so both are worth a run.
-        python-version: ["3.11", "3.12"]
+    env:
+      # The suite uses Pydantic AI's test model; it must never need a provider
+      # key or a live model request.
+      GEOAI_MODEL: test
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
 
       # The frontend tests load the real ES modules with node.
       - uses: actions/setup-node@v4
@@ -82,7 +80,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-failures-${{ matrix.python-version }}
+          name: pytest-failures
           path: |
             .pytest_cache/v/cache/lastfailed
             tests/**/*.log

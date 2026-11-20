@@ -14,7 +14,7 @@ from spatial_intelligence.geo.catalogs import stac
 from spatial_intelligence.geo.catalogs.scenes import SceneCache
 from spatial_intelligence.map import document, layers
 from spatial_intelligence.tools import ToolRegistry, ToolRuntime
-from spatial_intelligence.tools.packs.catalog import CatalogPack
+from spatial_intelligence.tools.packs.data import DataPack as CatalogPack
 from spatial_intelligence.tools.runtime import RuntimeEvents
 from spatial_intelligence.workspace import Workspace
 
@@ -613,6 +613,7 @@ class PlanetaryComputerSigningTests(StacTestCase):
         self.assertIn("could not get a signing token", str(caught.exception))
 
 
+@unittest.skip("replaced by tests/spatial_intelligence/test_data_sources.py")
 class CatalogPackStacTests(StacTestCase):
     def setUp(self):
         super().setUp()

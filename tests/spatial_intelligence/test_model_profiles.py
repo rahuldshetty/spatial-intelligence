@@ -153,7 +153,8 @@ class SearchRowTests(unittest.TestCase):
             "tags": ["license:mit"],
         }
 
-        profile = profiles.guess_from_search(row, "segmentation")
+        with mock.patch.object(profiles, "_installed", return_value=True):
+            profile = profiles.guess_from_search(row, "segmentation")
 
         self.assertEqual(profile.route, "research")
         self.assertEqual(profile.tasks, ("segmentation",))
@@ -188,7 +189,7 @@ class HintTests(unittest.TestCase):
     def test_the_hint_for_a_shipped_option_is_found(self):
         hint = __import__(
             "spatial_intelligence.workflows.library", fromlist=["option_hint"]
-        ).option_hint("hf:torchgeo/ftw")
+        ).option_hint("slimsam-77")
 
         self.assertIsNotNone(hint)
         self.assertEqual(hint["tasks"], ["segmentation"])
@@ -263,7 +264,9 @@ class LinkTests(unittest.TestCase):
             "spatial_intelligence.workflows.library", fromlist=["option_hint"]
         )
 
-        hint = library.option_hint("https://huggingface.co/torchgeo/ftw")
+        hint = library.option_hint(
+            "https://huggingface.co/Xenova/slimsam-77-uniform"
+        )
 
         self.assertIsNotNone(hint)
         self.assertEqual(hint["tasks"], ["segmentation"])

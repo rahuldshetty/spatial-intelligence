@@ -3,6 +3,9 @@
 /* -- design tokens -------------------------------------------------------- */
 
 :root {
+  /* Native select popups, date pickers, and scrollbars follow the app theme,
+     not the OS preference advertised by the document's light-dark meta. */
+  color-scheme: light;
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
@@ -47,6 +50,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0c1118;
   --surface: #141a23;
   --surface-2: #1a212c;

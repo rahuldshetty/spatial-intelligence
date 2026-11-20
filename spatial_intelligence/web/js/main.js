@@ -16,6 +16,7 @@ import { closeAllMenus } from "./components/menubar.js";
 import { revealInteraction } from "./components/interaction.js";
 import { updateJobNode } from "./components/progress.js";
 import { refreshStatusBar, setConnection } from "./components/status-bar.js";
+import { openDataSourcesDialog } from "./components/data-sources-dialog.js";
 import { openSettingsDialog } from "./components/settings-dialog.js";
 import { openToolConfigDialog } from "./components/tool-config-dialog.js";
 import { closeDialog, toast } from "./dom.js";
@@ -45,6 +46,7 @@ export function boot() {
     onFiles: handleFiles,
     onSettings: handleSettings,
     onToolConfig: handleToolConfig,
+    onDataSources: handleDataSources,
     onVision: handleVision,
     onRunning: handleRunning,
     onMapCapture: handleMapCapture,
@@ -75,6 +77,9 @@ function handleShortcut(event) {
     event.preventDefault();
     if (event.shiftKey) openToolConfigDialog();
     else openSettingsDialog();
+  } else if (key === "d" && event.shiftKey) {
+    event.preventDefault();
+    openDataSourcesDialog();
   } else if (event.key === "Enter") {
     event.preventDefault();
     if (event.shiftKey) {
@@ -285,6 +290,14 @@ function handleToolConfig(payload) {
   setState({
     tool_config: payload.effective,
     tool_config_source: payload.source || "global",
+  });
+}
+
+function handleDataSources(payload) {
+  if (!payload || !payload.effective) return;
+  setState({
+    data_sources: payload.effective,
+    data_sources_source: payload.source || "global",
   });
 }
 

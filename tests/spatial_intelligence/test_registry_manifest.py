@@ -53,8 +53,9 @@ EXPECTED_CORE = frozenset(
 EXPECTED_CATEGORY_COUNTS = {
     "ai": 4,
     "capability": 2,
-    "catalog": 9,
     "conversation": 1,
+    "data": 5,
+    "geo": 1,
     "detection": 1,
     "files": 6,
     "interaction": 1,
@@ -93,7 +94,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 106)
+        self.assertEqual(len(self.registry), 103)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -156,7 +157,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 98)
+        self.assertEqual(len(implemented), 95)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)
@@ -178,7 +179,8 @@ class ManifestTests(ManifestTestCase):
             {
                 "download",
                 "download_files",
-                "download_catalog_scene",
+                "add_data",
+                "download_data",
                 "to_cog",
                 "reproject",
                 "clip",
@@ -282,19 +284,12 @@ EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "query_output",
         "python_help",
     ),
-    "catalog.disaster-imagery": (
-        "search_vantor_events",
-        "search_vantor_imagery",
-        "search_openaerialmap",
-        "add_catalog_scene",
-        "download_catalog_scene",
-    ),
-    "catalog.satellite-imagery": (
-        "list_stac_catalogs",
-        "search_stac_collections",
-        "search_stac_scenes",
-        "add_catalog_scene",
-        "download_catalog_scene",
+    "data.sources": (
+        "list_data_sources",
+        "describe_data_source",
+        "search_data",
+        "add_data",
+        "download_data",
     ),
     "web.search": ("web_search",),
     "catalog.planet-stac": (),
@@ -348,7 +343,7 @@ class DiscoveryTests(ManifestTestCase):
     def test_the_catalog_still_ranks_and_annotates(self):
         results = discovery.discover(self.registry, "flood imagery download")
 
-        self.assertEqual(results[0]["id"], "catalog.disaster-imagery")
+        self.assertEqual(results[0]["id"], "data.sources")
         annotated = [tool for tool in results[0]["tools"] if isinstance(tool, dict)]
         self.assertTrue(annotated)
         for tool in annotated:
@@ -358,7 +353,7 @@ class DiscoveryTests(ManifestTestCase):
 
 class BuildTests(ManifestTestCase):
     def test_an_agent_can_be_built_from_the_manifest(self):
-        built = build_agent(self.registry, "openai:gpt-4o")
+        built = build_agent(self.registry, "test")
 
         self.assertIsNotNone(built.agent)
         self.assertIsNotNone(built.plan_store)

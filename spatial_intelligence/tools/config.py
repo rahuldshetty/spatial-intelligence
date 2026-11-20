@@ -61,6 +61,9 @@ REQUIRED_TOOL_REASONS: dict[str, str] = {
         "Reports which map methods the embedded bridge exposes; supports rule 10."
     ),
     "skill": "The skills index documents installed Python packages and their APIs.",
+    "list_data_sources": (
+        "System-prompt rule 3: the only way to discover enabled data sources."
+    ),
     "ai_models": (
         "System-prompt rule 5: names the local models and their download state "
         "before an AI task starts."
@@ -79,7 +82,8 @@ CATEGORY_LABELS: dict[str, str] = {
     "capability": "Capability discovery",
     "conversation": "Conversation history",
     "files": "Workspace files",
-    "catalog": "Imagery catalogs",
+    "data": "Data sources",
+    "geo": "Places & geocoding",
     "layers": "Map & layers",
     "raster": "Raster analysis",
     "vector": "Vector analysis",
@@ -99,7 +103,8 @@ CATEGORY_DESCRIPTIONS: dict[str, str] = {
     "capability": "Discovery and documentation for deferred tools.",
     "conversation": "Recall of earlier prompts, tool calls, and results in this workspace.",
     "files": "Workspace file listing, reading, writing, and downloads.",
-    "catalog": "Vantor, OpenAerialMap, and STAC imagery search.",
+    "data": "Search and add datasets from the enabled data-source registry.",
+    "geo": "Turn a place name into an area of interest.",
     "layers": "Adding, styling, comparing, and inspecting map layers.",
     "raster": "Clipping, indices, terrain, zonal stats, and rasters on the map.",
     "vector": "Vector inspection, geometry analysis, and map publication.",

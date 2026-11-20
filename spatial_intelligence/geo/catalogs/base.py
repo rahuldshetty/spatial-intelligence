@@ -82,6 +82,18 @@ def fetch_json(url: str, *, timeout: float = 30.0) -> dict:
     return _read_json(_request(url), timeout)
 
 
+def fetch_text(url: str, *, timeout: float = 60.0) -> str:
+    """Fetch one text/XML document over HTTPS, capped at 20 MiB."""
+    with urllib.request.urlopen(_request(url), timeout=timeout) as response:
+        length = response.headers.get("Content-Length")
+        if length and int(length) > MAX_JSON_BYTES:
+            raise ToolInputError(f"catalog response is too large: {length} bytes")
+        raw = response.read(MAX_JSON_BYTES + 1)
+    if len(raw) > MAX_JSON_BYTES:
+        raise ToolInputError("catalog response exceeded the 20 MiB safety limit")
+    return raw.decode("utf-8", errors="replace")
+
+
 def post_json(url: str, payload: dict, *, timeout: float = 30.0) -> dict:
     """POST a JSON body and read a JSON object back, under the same caps.
 
@@ -130,6 +142,7 @@ __all__ = [
     "SEARCH_STOP_WORDS",
     "event_id",
     "fetch_json",
+    "fetch_text",
     "links",
     "post_json",
     "search_terms",

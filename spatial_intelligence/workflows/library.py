@@ -25,10 +25,10 @@ Model: {model}
 Area of interest: {aoi}
 Input data: {source}
 
-Work with the tools you have: if no input file is given, search the catalogs for a
-scene over the AOI, download it into data/ (add_catalog_scene), and clip it to the
-AOI. Then run the model above the way its route describes, add_geojson the result
-and fit_bounds the AOI. Keep outputs under results/ and report their paths.
+Work with the tools you have: if no input file is given, list the data sources,
+search one for a scene over the AOI, add_data it, and clip it to the AOI. Then
+run the model above the way its route describes, add_geojson the result and
+fit_bounds the AOI. Keep outputs under results/ and report their paths.
 
 Analysis goal: {notes}
 """
@@ -40,11 +40,12 @@ Model: {model}
 Area of interest: {aoi}
 Input data: {source}
 
-Work with the tools you have: if no input file is given, find and download a scene
-over the AOI into data/. A detector needs about a metre per pixel, so prefer
-aerial or drone imagery (Vantor, OpenAerialMap) over 10 m satellite pixels: clip to
-the AOI, run the model above the way its route describes, then add_geojson the
-result and fit_bounds the AOI. Keep outputs under results/ and report their paths.
+Work with the tools you have: if no input file is given, list the data sources
+and search one over the AOI. A detector needs about a metre per pixel, so prefer
+aerial or drone imagery (Vantor, OpenAerialMap) over 10 m satellite pixels:
+add_data the scene, clip to the AOI, run the model above the way its route
+describes, then add_geojson the result and fit_bounds the AOI. Keep outputs
+under results/ and report their paths.
 
 Analysis goal: {notes}
 """
@@ -57,7 +58,7 @@ Analysis goal: {notes}
 
 Work with the tools you have: choose two comparable dates over the AOI. When the
 goal names dates, sensors, an index, or a threshold, use them; otherwise choose the
-most recent usable pair for the area. Search the catalogs, download both scenes
+most recent usable pair for the area. Search the data sources, add_data both scenes
 into data/, clip both to the AOI, and compute the change with run_python (band math
 over the aligned rasters) when no tool covers it. Polygonize the changed area, then
 add_geojson the result and fit_bounds the AOI. Keep outputs under results/ and
@@ -249,20 +250,21 @@ WORKFLOWS: tuple[WorkflowSpec, ...] = (
                 required=False,
                 description=(
                     "Accepted formats: a workspace path (data/…), an https URL, or a "
-                    "STAC scene key. Leave empty to search the catalogs for the AOI."
+                    "dataset key from search_data. Leave empty to search the data sources for the AOI."
                 ),
-                placeholder="path in data/, a URL, or a scene key — leave empty to search the catalogs",
+                placeholder="path in data/, a URL, or a dataset key — leave empty to search the data sources",
             ),
             NOTES_FIELD,
         ),
         prompt=SEGMENTATION_PROMPT,
         requires=(
             "segment_image",
-            "add_catalog_scene",
+            "list_data_sources",
+            "search_data",
+            "add_data",
             "clip",
             "add_geojson",
             "fit_bounds",
-            "search_stac_scenes",
         ),
     ),
     WorkflowSpec(
@@ -279,18 +281,18 @@ WORKFLOWS: tuple[WorkflowSpec, ...] = (
                 required=False,
                 description=(
                     "Accepted formats: a workspace path (data/…), an https URL, or a "
-                    "STAC scene key. Leave empty to search the catalogs for the AOI."
+                    "dataset key from search_data. Leave empty to search the data sources for the AOI."
                 ),
-                placeholder="path in data/, a URL, or a scene key — leave empty to search the catalogs",
+                placeholder="path in data/, a URL, or a dataset key — leave empty to search the data sources",
             ),
             NOTES_FIELD,
         ),
         prompt=DETECTION_PROMPT,
         requires=(
             "detect_objects",
-            "search_vantor_imagery",
-            "search_openaerialmap",
-            "add_catalog_scene",
+            "list_data_sources",
+            "search_data",
+            "add_data",
             "clip",
             "add_geojson",
             "fit_bounds",
@@ -303,8 +305,9 @@ WORKFLOWS: tuple[WorkflowSpec, ...] = (
         params=(AOI_FIELD, NOTES_FIELD),
         prompt=CHANGE_PROMPT,
         requires=(
-            "search_stac_scenes",
-            "add_catalog_scene",
+            "list_data_sources",
+            "search_data",
+            "add_data",
             "clip",
             "polygonize",
             "add_geojson",

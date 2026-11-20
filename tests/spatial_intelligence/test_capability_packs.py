@@ -35,9 +35,18 @@ class CapabilityCatalogTests(unittest.TestCase):
     def test_a_flood_imagery_goal_ranks_the_disaster_catalog_first(self):
         found = discovery.discover(None, "flood imagery download")
 
-        self.assertEqual(found[0]["id"], "catalog.disaster-imagery")
+        self.assertEqual(found[0]["id"], "data.sources")
         self.assertEqual(found[0]["status"], "available")
-        self.assertEqual(found[0]["geolibre_plugins"], ["Vantor Open Data", "OpenAerialMap"])
+        self.assertEqual(
+            found[0]["geolibre_plugins"],
+            [
+                "STAC Catalogs",
+                "ArcGIS Hub",
+                "NASA Earthdata",
+                "Vantor Open Data",
+                "OpenAerialMap",
+            ],
+        )
 
     def test_limit_is_clamped_to_the_range_the_catalog_can_answer(self):
         self.assertEqual(len(discovery.discover(None, "data map raster", limit=2)), 2)
@@ -63,7 +72,7 @@ class CapabilityCatalogTests(unittest.TestCase):
     def test_a_capability_whose_tools_are_all_unregistered_reports_none(self):
         found = discovery.discover(ToolRegistry(), "flood imagery download")
 
-        self.assertEqual(found[0]["id"], "catalog.disaster-imagery")
+        self.assertEqual(found[0]["id"], "data.sources")
         self.assertEqual(found[0]["tools"], [])
 
     def test_without_a_registry_names_stay_but_summaries_do_not(self):
@@ -104,7 +113,7 @@ class CapabilityCatalogTests(unittest.TestCase):
                 self.assertTrue(item["fallback"])
                 self.assertEqual(item["tools"], [])
 
-        executable = next(item for item in found if item["id"] == "catalog.disaster-imagery")
+        executable = next(item for item in found if item["id"] == "data.sources")
         self.assertIsNone(executable["fallback"])
 
 
@@ -148,7 +157,7 @@ class CapabilityPackTests(PackTestCase):
 
         found = registry.get("discover_capabilities").callable("flood imagery download").return_value
 
-        self.assertEqual(found[0]["id"], "catalog.disaster-imagery")
+        self.assertEqual(found[0]["id"], "data.sources")
         self.assertTrue(all(entry["summary"] is None for entry in found[0]["tools"]))
 
     def test_discovery_reveals_the_tools_it_lists(self):

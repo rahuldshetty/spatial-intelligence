@@ -663,6 +663,7 @@ class StatusBarRenderingTests(WebRenderingTestCase):
         self.assertIn("reconnecting", rendered["title"].lower())
 
 
+@unittest.skipUnless(MARKED_JS.exists(), "The downloaded Marked asset is required")
 class PromptTraceRenderingTests(WebRenderingTestCase):
     def test_a_finished_prompt_folds_steps_after_the_final_answer(self):
         rendered = self.run_module(
@@ -726,6 +727,7 @@ class PromptTraceRenderingTests(WebRenderingTestCase):
         self.assertTrue(rendered["trace"])
 
 
+@unittest.skipUnless(MARKED_JS.exists(), "The downloaded Marked asset is required")
 class TraceModalTests(WebRenderingTestCase):
     def test_the_modal_shows_totals_requests_and_all_steps(self):
         usage = {

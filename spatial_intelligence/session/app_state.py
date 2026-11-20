@@ -23,6 +23,15 @@ from ..agent.vision import VisionService
 from ..ai import profiles
 from ..contracts.errors import ToolInputError
 from ..contracts.ids import new_id
+from ..data_sources import DataQuery, DataService, DataSourceRegistry, default_sources
+from ..data_sources.store import (
+    effective_data_source_config,
+    load_global_data_source_config,
+    load_workspace_data_source_config,
+    normalize_data_source_config,
+    save_global_data_source_config,
+    save_workspace_data_source_config,
+)
 from ..map.bridge import reset_bridge
 from ..map import MAP_LOCK
 from ..settings import prefs
@@ -244,6 +253,139 @@ class AppState:
             {"effective": payload["effective"], "source": payload["source"]},
         )
         return payload
+
+    # -- data sources ----------------------------------------------------
+
+    def _data_source_config(self) -> tuple[dict, str]:
+        """Return the effective data-source config and where it came from."""
+        global_config = load_global_data_source_config()
+        workspace = self.workspaces.workspace
+        if workspace is not None:
+            stored = load_workspace_data_source_config(workspace)
+            if stored is not None:
+                return stored, "workspace"
+        return global_config, "global"
+
+    def _data_source_registry(self) -> DataSourceRegistry:
+        """Return the bound registry, or a fresh one before a workspace opens."""
+        bound = self.services.data_source_registry
+        if bound is not None:
+            return bound
+        return DataSourceRegistry(
+            default_sources(), effective_data_source_config(self.workspaces.workspace)
+        )
+
+    def data_sources_payload(self) -> dict:
+        """Return both scopes, the effective config, and every source row."""
+        with self.lock:
+            effective, source = self._data_source_config()
+            workspace = self.workspaces.workspace
+            workspace_config = (
+                load_workspace_data_source_config(workspace)
+                if workspace is not None
+                else None
+            )
+            registry = DataSourceRegistry(default_sources(), effective)
+            return {
+                "source": source,
+                "global": load_global_data_source_config(),
+                "workspace": workspace_config,
+                "effective": effective,
+                "categories": registry.categories(),
+                "sources": registry.payload(),
+            }
+
+    def update_data_source_config(self, scope: str, config: dict) -> dict:
+        """Persist enable/disable choices and reconfigure the live registry."""
+        if scope not in ("global", "workspace"):
+            raise ToolInputError(f"unknown data-source configuration scope: {scope!r}")
+        normalized = normalize_data_source_config(config)
+        self.runs.wait_idle()
+        with self.lock:
+            if scope == "global":
+                save_global_data_source_config(normalized)
+            else:
+                workspace = self.workspaces.workspace
+                if workspace is None:
+                    raise ToolInputError(
+                        "open a workspace before saving a workspace data-source configuration"
+                    )
+                save_workspace_data_source_config(workspace, normalized)
+            registry = self.services.data_source_registry
+            if registry is not None:
+                registry.configure(normalized)
+            payload = self.data_sources_payload()
+        self.bus.publish(
+            "data_sources",
+            {"effective": payload["effective"], "source": payload["source"]},
+        )
+        return payload
+
+    def search_data_source(self, source_id: str, body: dict) -> dict:
+        """Run one source query for the registry modal."""
+        query = DataQuery(
+            text=str(body.get("text") or ""),
+            bbox=body.get("bbox"),
+            start=body.get("start_date"),
+            end=body.get("end_date"),
+            limit=int(body.get("limit") or 20),
+            cursor=body.get("cursor"),
+            filters=body.get("filters") or {},
+        )
+        service = DataService(self.workspaces.workspace, self._data_source_registry())
+        page = service.search(source_id, query)
+        return _data_page(source_id, page)
+
+    def _data_source_service(self) -> DataService:
+        runtime = self.services.runtime
+        workspace = self.workspaces.workspace
+        if runtime is None or workspace is None:
+            raise ToolInputError("open a workspace before adding or downloading data")
+        registry = self.services.data_source_registry or self._data_source_registry()
+        return DataService(
+            workspace,
+            registry,
+            map_obj=runtime.map,
+            reporter=lambda: runtime.reporter,
+            file_url=runtime.file_url,
+            notify_files=runtime.events.notify_files,
+            notify_map=runtime.events.notify_map,
+            record_artifact=runtime.record_artifact,
+        )
+
+    def add_data_source_dataset(
+        self,
+        source_id: str,
+        dataset_id: str,
+        *,
+        asset_id: str | None = None,
+        name: str | None = None,
+        download: bool = True,
+    ) -> dict:
+        """Add one searched dataset to the live map from the registry modal."""
+        return self._data_source_service().add(
+            source_id,
+            dataset_id,
+            asset_id=asset_id,
+            name=name,
+            download=download,
+        )
+
+    def download_data_source_dataset(
+        self,
+        source_id: str,
+        dataset_id: str,
+        *,
+        asset_id: str | None = None,
+        filename: str | None = None,
+    ) -> dict:
+        """Download one searched dataset into the workspace from the modal."""
+        return self._data_source_service().download(
+            source_id,
+            dataset_id,
+            asset_id=asset_id,
+            filename=filename,
+        )
 
     def update_settings(self, patch: dict) -> dict:
         """Merge ``patch`` into settings, persist, and rebuild the agent on change.
@@ -998,3 +1140,15 @@ class AppState:
         if workspace is None:
             raise ToolInputError("no workspace open")
         return workspace
+
+
+def _data_page(source_id: str, page) -> dict:
+    """Serialize a SearchPage with the stable key the modal sends back."""
+    return {
+        "source": source_id,
+        "total": page.total,
+        "next_cursor": page.next_cursor,
+        "datasets": [
+            {**dataset.as_dict(), "key": dataset.key} for dataset in page.datasets
+        ],
+    }

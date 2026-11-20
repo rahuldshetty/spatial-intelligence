@@ -2168,17 +2168,19 @@
 #dialog.data-sources-dialog {
   display: flex;
   flex-direction: column;
-  width: min(1040px, calc(100vw - 40px));
-  max-width: 1040px;
+  width: min(1240px, calc(100vw - 40px));
+  max-width: 1240px;
+  height: min(760px, calc(100vh - 40px));
   max-height: calc(100vh - 40px);
-  padding: 20px 0 0;
+  padding: 14px 0 0;
   overflow: hidden;
 }
 
-.data-sources-dialog .dialog-heading,
-.data-sources-dialog .data-sources-scope,
-.data-sources-dialog .dialog-status,
-.data-sources-dialog .dialog-actions {
+.data-sources-dialog .dialog-subtitle {
+  margin-bottom: 10px;
+}
+
+.data-sources-dialog .dialog-heading {
   margin-left: 22px;
   margin-right: 22px;
 }
@@ -2202,10 +2204,9 @@
 
 .data-sources-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   flex: 1 1 auto;
-  min-height: 320px;
-  max-height: min(620px, calc(100vh - 265px));
+  min-height: 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   overflow: hidden;
@@ -2215,9 +2216,13 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 10px 8px 12px 22px;
+  padding: 8px 8px 10px 20px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
 }
 
 .data-sources-filter {
@@ -2348,8 +2353,26 @@
 
 .data-sources-main {
   min-width: 0;
-  padding: 12px 22px 16px;
+  min-height: 0;
+  padding: 10px 20px 14px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.data-sources-main::-webkit-scrollbar,
+.data-sources-sidebar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.data-sources-main::-webkit-scrollbar-thumb,
+.data-sources-sidebar::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong);
+  background-clip: padding-box;
 }
 
 .data-sources-detail-head {
@@ -2433,7 +2456,7 @@
 
 .data-sources-fields {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px 14px;
 }
 
@@ -2652,15 +2675,10 @@
   padding-left: 16px;
 }
 
-.data-sources-dialog .dialog-status {
-  min-height: 16px;
-  margin-top: 6px;
-}
-
-.data-sources-dialog .dialog-actions {
-  margin-top: 0;
-  padding: 10px 0 16px;
-  border-top: 1px solid var(--border);
+@media (max-width: 980px) {
+  .data-sources-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {

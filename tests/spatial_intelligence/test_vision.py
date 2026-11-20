@@ -286,7 +286,7 @@ class VisionGatingTests(unittest.TestCase):
             services = SessionServices(
                 bus=bus,
                 jobs=jobs,
-                settings=lambda: {"model": "openai:gpt-4o"},
+                settings=lambda: {"model": "test"},
                 files_provider=lambda: [],
                 map_state=lambda: {
                     "workspace": None,

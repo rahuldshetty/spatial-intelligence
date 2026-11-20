@@ -353,7 +353,7 @@ class DiscoveryTests(ManifestTestCase):
 
 class BuildTests(ManifestTestCase):
     def test_an_agent_can_be_built_from_the_manifest(self):
-        built = build_agent(self.registry, "openai:gpt-4o")
+        built = build_agent(self.registry, "test")
 
         self.assertIsNotNone(built.agent)
         self.assertIsNotNone(built.plan_store)

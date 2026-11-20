@@ -618,7 +618,7 @@ class StartupReportTests(unittest.TestCase):
             banner,
             "list_workspaces",
             return_value=[f"a-fairly-long-workspace-name-{index}" for index in range(12)],
-        ):
+        ), mock.patch.object(banner, "app_root", return_value=Path("/data")):
             text = banner.startup_report(self.registry)
 
         widest = max(len(line) for line in text.splitlines())

@@ -61,15 +61,6 @@ export function openDataSourcesDialog() {
     layout.append(sidebar, main);
     dialog.append(layout);
 
-    const status = el("p", { class: "dialog-status" });
-    dialog.append(status);
-
-    const actions = el("div", { class: "dialog-actions" });
-    actions.append(
-      el("button", { type: "button", text: "Close", onclick: closeDialog })
-    );
-    dialog.append(actions);
-
     let payload = null;
     let selectedId = null;
     let filterText = "";
@@ -94,8 +85,7 @@ export function openDataSourcesDialog() {
         main.replaceChildren(
           el("p", { class: "data-sources-empty", text: "Could not load data sources." })
         );
-        status.className = "dialog-status error";
-        status.textContent = error.message || String(error);
+        toast(error.message || String(error), "error");
       });
 
     function workspaceAvailable() {
@@ -113,8 +103,9 @@ export function openDataSourcesDialog() {
     }
 
     function setStatus(message, kind = "") {
-      status.className = "dialog-status" + (kind ? " " + kind : "");
-      status.textContent = message || "";
+      // The modal has no footer; errors surface as toasts, progress is carried
+      // by the spinner on the Search button, and success has its own toast.
+      if (kind === "error" && message) toast(message, "error");
     }
 
     function setFormBusy(active) {
@@ -667,7 +658,6 @@ export function openDataSourcesDialog() {
         drilldown = drilled ? { filter: drilled, value: body.filters[drilled] } : null;
         drawResults(source, page);
         scrollResultsIntoView();
-        setStatus(resultLine(page), "");
       } catch (error) {
         setStatus(error.message || String(error), "error");
         if (resultsNode) resultsNode.replaceChildren(emptyResults("Search failed."));
@@ -675,12 +665,6 @@ export function openDataSourcesDialog() {
         busy = false;
         setFormBusy(false);
       }
-    }
-
-    function resultLine(page) {
-      const count = page.datasets?.length || 0;
-      if (page.total != null) return count + " shown • " + page.total + " total";
-      return count + " result" + (count === 1 ? "" : "s");
     }
 
     function emptyResults(message) {
@@ -905,7 +889,6 @@ export function openDataSourcesDialog() {
           datasets: [...(results.datasets || []), ...(page.datasets || [])],
         };
         drawResults(source, results);
-        setStatus(resultLine(results), "");
       } catch (error) {
         setStatus(error.message || String(error), "error");
       } finally {

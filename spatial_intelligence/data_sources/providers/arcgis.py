@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlencode
 
@@ -81,8 +82,13 @@ class ArcGISSource(DataSource):
                 "sort",
                 "Sort",
                 "select",
-                default="relevance",
-                choices=(("relevance", "Relevance"), ("title", "Title")),
+                default="popular",
+                choices=(
+                    ("popular", "Most viewed"),
+                    ("relevance", "Relevance"),
+                    ("modified", "Recently updated"),
+                    ("title", "Title A–Z"),
+                ),
             ),
         ),
         docs_url="https://developers.arcgis.com/rest/services-reference/enterprise/search.htm",
@@ -102,13 +108,22 @@ class ArcGISSource(DataSource):
         except (TypeError, ValueError) as exc:
             raise ToolInputError("ArcGIS cursor must be a numeric start") from exc
         start = max(1, start)
+        sort_choice = str(query.filters.get("sort") or "relevance")
+        if sort_choice == "title":
+            sort_field, sort_order = "title", "asc"
+        elif sort_choice == "modified":
+            sort_field, sort_order = "modified", "desc"
+        elif sort_choice == "popular" or not text:
+            sort_field, sort_order = "numviews", "desc"
+        else:
+            sort_field, sort_order = "relevance", "desc"
         params = {
             "q": " AND ".join(clauses),
             "f": "json",
             "num": str(min(max(query.limit * 2, 10), 100)),
             "start": str(start),
-            "sortField": "relevance" if text and query.filters.get("sort") != "title" else "title",
-            "sortOrder": "desc" if text and query.filters.get("sort") != "title" else "asc",
+            "sortField": sort_field,
+            "sortOrder": sort_order,
         }
         if query.bbox is not None:
             params["bbox"] = ",".join(str(value) for value in query.bbox)
@@ -410,7 +425,7 @@ class ArcGISSource(DataSource):
             kind=kind,
             description=str(item.get("snippet") or item.get("description") or "")[:500],
             bbox=bbox,
-            datetime=item.get("modified"),
+            datetime=_item_datetime(item.get("modified")),
             thumbnail_url=item.get("thumbnail"),
             license=str(license_info) if license_info else None,
             attribution=str(attribution),
@@ -428,6 +443,21 @@ class ArcGISSource(DataSource):
             },
             assets=assets,
         )
+
+
+def _item_datetime(value: object) -> str | None:
+    """Normalize ArcGIS's epoch-millisecond ``modified`` to an ISO date."""
+    if value is None or value == "":
+        return None
+    try:
+        stamp = float(value)
+    except (TypeError, ValueError):
+        text = str(value).strip()
+        return text[:10] if text else None
+    try:
+        return datetime.fromtimestamp(stamp / 1000.0, tz=timezone.utc).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _cached_map_service(info: dict) -> bool:

@@ -1,10 +1,9 @@
-/* Data Sources: the registry of enabled catalogs, their filters, and results.
+/* Data Sources: the registry of available catalogs, their filters, and results.
 
-The modal is two panes: sources on the left (enable/disable, grouped by
-category) and one source on the right (search or browse, then add/download).
-Enable/disable is a draft save like Tool Configuration; search results are
-ephemeral. The search form is generated from the source's FilterSpec list, so a
-new backend source needs no frontend change.
+The modal is two panes: sources on the left, grouped by category, and one source
+on the right (search, drill down, then add/download). Sources are enabled by
+default and the modal only browses them; the backend still keeps the
+enable/disable configuration for a future opt-in UI.
 */
 
 "use strict";
@@ -13,12 +12,11 @@ import {
   addDataSourceDataset,
   downloadDataSourceDataset,
   getDataSources,
-  saveDataSourceConfig,
   searchDataSource,
 } from "../api.js";
 import { closeDialog, el, openDialog, toast } from "../dom.js";
 import { icon } from "../icons.js";
-import { setState, state } from "../store.js";
+import { state } from "../store.js";
 
 const KIND_LABELS = {
   raster: "Raster",
@@ -36,14 +34,6 @@ const CAPABILITY_LABELS = {
   map: "Map",
 };
 
-function clone(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function uniqueSorted(values) {
-  return Array.from(new Set(values || [])).sort();
-}
-
 function text(value) {
   return value == null ? "" : String(value);
 }
@@ -58,36 +48,12 @@ export function openDataSourcesDialog() {
       el("p", {
         class: "dialog-subtitle",
         text:
-          "Open the data-source registry, enable or disable sources, and search " +
-          "their datasets. Search terms are optional; Save to workspace writes " +
-          "only the selected dataset under data/.",
+          "Search the available data sources and add a dataset to the map. " +
+          "Search terms are optional; Save to workspace writes only the selected " +
+          "dataset under data/.",
       })
     );
     dialog.append(heading);
-
-    const scopeBar = el("div", { class: "data-sources-scope" });
-    const scopeSwitch = el("div", {
-      class: "scope-switch",
-      role: "group",
-      "aria-label": "Configuration scope",
-    });
-    const scopeButtons = {};
-    for (const [id, label] of [
-      ["global", "Global"],
-      ["workspace", "This workspace"],
-    ]) {
-      const button = el("button", {
-        type: "button",
-        text: label,
-        "aria-pressed": "false",
-        onclick: () => selectScope(id),
-      });
-      scopeButtons[id] = button;
-      scopeSwitch.append(button);
-    }
-    const scopeNote = el("p", { class: "data-sources-scope-note" });
-    scopeBar.append(scopeSwitch, scopeNote);
-    dialog.append(scopeBar);
 
     const layout = el("div", { class: "data-sources-layout" });
     const sidebar = el("div", { class: "data-sources-sidebar" });
@@ -99,22 +65,12 @@ export function openDataSourcesDialog() {
     dialog.append(status);
 
     const actions = el("div", { class: "dialog-actions" });
-    const hint = el("span", {
-      class: "dialog-footer-hint",
-      text: "Disable a source to hide it from the agent. Cancel discards unsaved changes.",
-    });
-    const cancel = el("button", { type: "button", text: "Cancel", onclick: closeDialog });
-    const save = el("button", {
-      class: "primary",
-      type: "button",
-      text: "Save changes",
-      disabled: "disabled",
-    });
-    actions.append(hint, cancel, save);
+    actions.append(
+      el("button", { type: "button", text: "Close", onclick: closeDialog })
+    );
     dialog.append(actions);
 
     let payload = null;
-    let scope = "global";
     let selectedId = null;
     let filterText = "";
     let mode = "search";
@@ -126,18 +82,12 @@ export function openDataSourcesDialog() {
     let currentForm = null;
     let resultsNode = null;
     let drilldown = null;
-    const drafts = {};
 
     main.append(el("p", { class: "data-sources-empty", text: "Loading sources…" }));
 
     getDataSources()
       .then((data) => {
         payload = data;
-        scope = data.source === "workspace" && state.active_workspace ? "workspace" : "global";
-        if (data.source === "workspace" && !state.active_workspace) scope = "global";
-        drafts.global = clone(data.global || {});
-        if (data.workspace) drafts.workspace = clone(data.workspace);
-        save.disabled = false;
         render();
       })
       .catch((error) => {
@@ -152,26 +102,10 @@ export function openDataSourcesDialog() {
       return Boolean(state.active_workspace);
     }
 
-    function draftFor(target) {
-      if (!drafts[target]) {
-        const base =
-          target === "workspace"
-            ? payload.workspace || payload.global
-            : payload.global;
-        drafts[target] = clone(base || {});
-      }
-      drafts[target].disabled_sources = drafts[target].disabled_sources || [];
-      return drafts[target];
-    }
-
     function selectedSource() {
       return payload && selectedId
         ? payload.sources.find((source) => source.id === selectedId) || null
         : null;
-    }
-
-    function sourceEnabled(source) {
-      return !draftFor(scope).disabled_sources.includes(source.id);
     }
 
     function conditions(source) {
@@ -183,44 +117,25 @@ export function openDataSourcesDialog() {
       status.textContent = message || "";
     }
 
-    function markDirty() {
-      setStatus("Unsaved changes");
-    }
-
-    function selectScope(next) {
-      if (!payload || next === scope) return;
-      if (next === "workspace" && !workspaceAvailable()) return;
-      scope = next;
-      results = null;
-      lastQuery = null;
-      render();
+    function setFormBusy(active) {
+      if (!currentForm) return;
+      for (const control of currentForm.node.querySelectorAll("input, select, button")) {
+        control.disabled = active;
+      }
+      currentForm.submit.classList.toggle("loading", active);
+      if (active) {
+        currentForm.submit.replaceChildren(
+          el("span", { class: "data-sources-spinner" }),
+          document.createTextNode("Searching…")
+        );
+      } else {
+        currentForm.submit.replaceChildren(document.createTextNode("Search"));
+      }
     }
 
     function render() {
-      renderScope();
       renderSidebar();
       renderMain();
-    }
-
-    function renderScope() {
-      for (const [id, button] of Object.entries(scopeButtons)) {
-        const active = id === scope;
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-pressed", String(active));
-        button.disabled = id === "workspace" && !workspaceAvailable();
-      }
-      const hasOverride = Boolean(payload && payload.workspace);
-      if (scope === "global") {
-        scopeNote.textContent =
-          "Saved to workspaces/data_sources.json. Workspaces with their own file override it.";
-      } else if (!workspaceAvailable()) {
-        scopeNote.textContent = "Open a workspace to save a workspace configuration.";
-      } else if (hasOverride) {
-        scopeNote.textContent = "This workspace has its own data_sources.json.";
-      } else {
-        scopeNote.textContent =
-          "This workspace follows the global configuration. Saving creates a workspace override.";
-      }
     }
 
     function renderSidebar() {
@@ -279,15 +194,8 @@ export function openDataSourcesDialog() {
 
     function sourceGroup(label, rows) {
       const section = el("section", { class: "data-sources-group" });
-      const enabled = rows.filter(sourceEnabled).length;
       const head = el("div", { class: "data-sources-group-head" });
-      head.append(
-        el("span", { class: "data-sources-group-name", text: label }),
-        el("span", {
-          class: "data-sources-group-meta",
-          text: enabled + " of " + rows.length + " enabled",
-        })
-      );
+      head.append(el("span", { class: "data-sources-group-name", text: label }));
       section.append(head);
       for (const source of rows) section.append(sourceRow(source));
       return section;
@@ -296,24 +204,7 @@ export function openDataSourcesDialog() {
     function sourceRow(source) {
       const row = el("div", {
         class:
-          "data-sources-row" +
-          (source.id === selectedId ? " selected" : "") +
-          (sourceEnabled(source) ? "" : " disabled"),
-      });
-      const check = el("input", {
-        type: "checkbox",
-        "aria-label": "Enable " + source.name,
-      });
-      check.checked = sourceEnabled(source);
-      check.addEventListener("change", () => {
-        const draft = draftFor(scope);
-        const disabled = new Set(draft.disabled_sources || []);
-        if (check.checked) disabled.delete(source.id);
-        else disabled.add(source.id);
-        draft.disabled_sources = uniqueSorted(Array.from(disabled));
-        markDirty();
-        renderSidebar();
-        renderMain();
+          "data-sources-row" + (source.id === selectedId ? " selected" : ""),
       });
       const button = el("button", {
         type: "button",
@@ -328,7 +219,7 @@ export function openDataSourcesDialog() {
         title,
         el("span", { class: "data-sources-row-summary", text: source.summary })
       );
-      row.append(check, button);
+      row.append(button);
       return row;
     }
 
@@ -369,7 +260,6 @@ export function openDataSourcesDialog() {
       );
       const badges = el("div", { class: "data-sources-badges" });
       badges.append(badge(source.category));
-      if (!sourceEnabled(source)) badges.append(badge("Disabled"));
       if (!source.available) badges.append(badge("Unavailable"));
       for (const capability of source.capabilities || []) {
         if (capability === "spatial") continue;
@@ -405,14 +295,6 @@ export function openDataSourcesDialog() {
 
       const body = el("div", { class: "data-sources-body" });
       main.append(body);
-      if (!sourceEnabled(source)) {
-        body.append(
-          el("p", {
-            class: "data-sources-note",
-            text: "This source is disabled for the selected scope. Enable it on the left, then Save changes.",
-          })
-        );
-      }
       if (mode === "about") renderAbout(body, source);
       else renderSearch(body, source);
     }
@@ -770,6 +652,7 @@ export function openDataSourcesDialog() {
         return;
       }
       busy = true;
+      setFormBusy(true);
       setStatus("Searching " + source.name + "…");
       try {
         const page = await searchDataSource(source.id, body);
@@ -790,6 +673,7 @@ export function openDataSourcesDialog() {
         if (resultsNode) resultsNode.replaceChildren(emptyResults("Search failed."));
       } finally {
         busy = false;
+        setFormBusy(false);
       }
     }
 
@@ -890,7 +774,7 @@ export function openDataSourcesDialog() {
       title.append(badge(KIND_LABELS[dataset.kind] || dataset.kind));
       body.append(title);
       const meta = [
-        dataset.datetime ? dataset.datetime.slice(0, 10) : "",
+        dataset.datetime ? String(dataset.datetime).slice(0, 10) : "",
         dataset.attribution || "",
         dataset.license || "",
       ].filter(Boolean);
@@ -921,8 +805,7 @@ export function openDataSourcesDialog() {
           );
         }
       } else {
-        const canAdd =
-          sourceEnabled(source) && conditions(source).has("map") && workspaceAvailable();
+        const canAdd = conditions(source).has("map") && workspaceAvailable();
         const addButton = el("button", {
           type: "button",
           class: "data-sources-action primary",
@@ -937,8 +820,7 @@ export function openDataSourcesDialog() {
             type: "button",
             class: "data-sources-action",
             text: "Save to workspace",
-            disabled:
-              sourceEnabled(source) && workspaceAvailable() ? null : "disabled",
+            disabled: workspaceAvailable() ? null : "disabled",
             onclick: () => downloadDataset(source, dataset, downloadButton),
           });
           actions.append(downloadButton);
@@ -1037,28 +919,5 @@ export function openDataSourcesDialog() {
       return node;
     }
 
-    save.addEventListener("click", async () => {
-      if (!payload) return;
-      const draft = clone(draftFor(scope));
-      draft.disabled_sources = uniqueSorted(draft.disabled_sources || []);
-      save.disabled = true;
-      cancel.disabled = true;
-      setStatus("Saving…");
-      try {
-        const response = await saveDataSourceConfig(scope, draft);
-        payload = response;
-        drafts[scope] = clone(response.effective || draft);
-        setState({
-          data_sources: response.effective,
-          data_sources_source: response.source,
-        });
-        toast("Data source configuration saved", "success");
-        closeDialog();
-      } catch (error) {
-        setStatus(error.message || String(error), "error");
-        save.disabled = false;
-        cancel.disabled = false;
-      }
-    });
   });
 }

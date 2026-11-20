@@ -2704,3 +2704,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.data-sources-form-actions button.loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.data-sources-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: data-sources-spin 700ms linear infinite;
+}
+
+@keyframes data-sources-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

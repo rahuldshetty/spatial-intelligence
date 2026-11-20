@@ -17,6 +17,14 @@ from unittest import mock
 
 from starlette.testclient import TestClient
 
+from spatial_intelligence.data_sources import (
+    DataQuery,
+    Dataset,
+    DataSource,
+    SearchPage,
+    SourceCapability,
+    SourceDescriptor,
+)
 from spatial_intelligence.discovery import CAPABILITIES
 from spatial_intelligence.settings.env import app_root
 from spatial_intelligence.server import banner, deps
@@ -472,6 +480,91 @@ class EventStreamTests(ServerTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _StubDataSource(DataSource):
+    descriptor = SourceDescriptor(
+        id="stub",
+        name="Stub source",
+        summary="A source with no network.",
+        category="imagery",
+        capabilities=frozenset({SourceCapability.SEARCH}),
+    )
+
+    def search(self, query: DataQuery) -> SearchPage:
+        return SearchPage(
+            datasets=(
+                Dataset(
+                    source_id="stub",
+                    id="dataset-1",
+                    title="Stub dataset",
+                    kind="raster",
+                ),
+            ),
+            total=1,
+        )
+
+
+class DataSourceRouteTests(ServerTestCase):
+    def test_the_registry_payload_lists_sources_and_scopes(self):
+        with mock.patch(
+            "spatial_intelligence.session.app_state.default_sources",
+            return_value=[_StubDataSource()],
+        ):
+            response = self.client.get("/api/data-sources")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["source"], "global")
+        self.assertEqual([row["id"] for row in payload["sources"]], ["stub"])
+        self.assertEqual(payload["categories"][0]["id"], "imagery")
+
+    def test_enable_disable_round_trips_and_reports_the_effective_scope(self):
+        with mock.patch(
+            "spatial_intelligence.session.app_state.default_sources",
+            return_value=[_StubDataSource()],
+        ):
+            saved = self.client.put(
+                "/api/data-sources/config",
+                json={"scope": "global", "config": {"disabled_sources": ["stub"]}},
+            )
+            payload = self.client.get("/api/data-sources").json()
+
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(payload["effective"]["disabled_sources"], ["stub"])
+        self.assertFalse(payload["sources"][0]["enabled"])
+
+    def test_a_workspace_save_requires_an_open_workspace(self):
+        response = self.client.put(
+            "/api/data-sources/config",
+            json={"scope": "workspace", "config": {}},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("open a workspace", response.json()["detail"])
+
+    def test_search_returns_the_normalized_page(self):
+        with mock.patch(
+            "spatial_intelligence.session.app_state.default_sources",
+            return_value=[_StubDataSource()],
+        ):
+            response = self.client.post(
+                "/api/data-sources/stub/search", json={"text": "", "limit": 5}
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["datasets"][0]["key"], "stub:dataset-1")
+        self.assertEqual(payload["datasets"][0]["title"], "Stub dataset")
+
+    def test_an_unknown_source_is_a_bad_request(self):
+        response = self.client.post(
+            "/api/data-sources/missing/search", json={"text": ""}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("unknown data source", response.json()["detail"])
 
 
 class StartupReportTests(unittest.TestCase):

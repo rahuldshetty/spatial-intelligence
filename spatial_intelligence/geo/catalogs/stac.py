@@ -225,6 +225,7 @@ def search_scenes(
     sort: str = "date",
     limit: int = 20,
     sas: "SasTokenCache | None" = None,
+    sign: bool = True,
 ) -> dict:
     """Search one catalog's items and remember each usable scene in ``cache``.
 
@@ -232,6 +233,10 @@ def search_scenes(
     own count of items in the query area when it reports one (``None`` when it
     does not), so the caller can tell "nothing published" apart from "this page
     was capped". Scenes whose item carries no readable GeoTIFF asset are dropped.
+
+    ``sign=False`` returns the cached (unsigned) scene hrefs, which is what a
+    caller that persists its own normalized records needs; the default signs a
+    copy for immediate use.
     """
     requested = [str(name).strip() for name in collections if str(name).strip()]
     if not requested:
@@ -281,7 +286,10 @@ def search_scenes(
     return {
         "catalog": catalog.key,
         "matched": matched,
-        "scenes": [_present(scene, signer) for scene in scenes[:limit]],
+        "scenes": [
+            _present(scene, signer) if sign else dict(scene)
+            for scene in scenes[:limit]
+        ],
         # Items the provider returned that no scene could be built from: without
         # this, a collection whose assets are point clouds or PDFs reads as "no
         # data in this area" rather than "nothing here is a raster".

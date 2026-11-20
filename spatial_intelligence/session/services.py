@@ -21,9 +21,12 @@ from ..contracts.errors import RuntimeNotBoundError
 from ..contracts.services import (
     CAPTURE_SERVICE,
     CONVERSATION_SERVICE,
+    DATA_SOURCES_SERVICE,
     MAP_BRIDGE_SERVICE,
     VISION_SERVICE,
 )
+from ..data_sources import DataSourceRegistry, default_sources
+from ..data_sources.store import effective_data_source_config
 from ..pythonruntime.policy import PythonPolicy
 from ..settings.env import server_base_url
 from ..tools.build import default_registry
@@ -133,6 +136,14 @@ class SessionServices:
         return self._runtime
 
     @property
+    def data_source_registry(self) -> DataSourceRegistry | None:
+        """The session's data-source registry, or ``None`` before bind."""
+        if self._runtime is None:
+            return None
+        registry = self._runtime.services.get(DATA_SOURCES_SERVICE)
+        return registry if isinstance(registry, DataSourceRegistry) else None
+
+    @property
     def registry(self) -> ToolRegistry:
         """The session's tool registry."""
         if self._registry is None:
@@ -187,6 +198,9 @@ class SessionServices:
             runtime.services[MAP_BRIDGE_SERVICE] = self._map_bridge
         if self._conversation is not None:
             runtime.services[CONVERSATION_SERVICE] = self._conversation
+        runtime.services[DATA_SOURCES_SERVICE] = DataSourceRegistry(
+            default_sources(), effective_data_source_config(workspace)
+        )
         registry = default_registry(runtime)
         apply_tool_config(registry, config)
         # The capability pack reads the registry back out of the service bag, so

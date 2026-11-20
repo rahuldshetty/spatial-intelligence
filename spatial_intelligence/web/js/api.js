@@ -43,6 +43,46 @@ export function saveToolConfig(scope, config) {
   return request("PUT", "/api/tools/config", { scope, config });
 }
 
+export function getDataSources() {
+  return request("GET", "/api/data-sources");
+}
+
+export function saveDataSourceConfig(scope, config) {
+  return request("PUT", "/api/data-sources/config", { scope, config });
+}
+
+export function searchDataSource(sourceId, body) {
+  return request(
+    "POST",
+    "/api/data-sources/" + encodeURIComponent(sourceId) + "/search",
+    body
+  );
+}
+
+export function addDataSourceDataset(sourceId, datasetId, body) {
+  return request(
+    "POST",
+    "/api/data-sources/" +
+      encodeURIComponent(sourceId) +
+      "/datasets/" +
+      encodeURIComponent(datasetId) +
+      "/add",
+    body
+  );
+}
+
+export function downloadDataSourceDataset(sourceId, datasetId, body) {
+  return request(
+    "POST",
+    "/api/data-sources/" +
+      encodeURIComponent(sourceId) +
+      "/datasets/" +
+      encodeURIComponent(datasetId) +
+      "/download",
+    body
+  );
+}
+
 export function listWorkflows() {
   return request("GET", "/api/workflows");
 }

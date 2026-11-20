@@ -12,8 +12,10 @@ every output is a real file in the workspace you can inspect or reuse.
 
 **📡 Imagery and data**
 
-- Search and download open imagery: STAC catalogs (Sentinel-2, Landsat, NAIP,
-  Sentinel-1, DEMs), Vantor disaster releases, OpenAerialMap.
+- Search and download through one data-source registry: STAC catalogs
+  (Sentinel-2, Landsat, NAIP, Sentinel-1, DEMs), ArcGIS Hub/public ArcGIS
+  services, NASA GIBS daily imagery, USGS 3DEP elevation, Vantor disaster
+  releases, and OpenAerialMap.
 - Import local files or folders, or download by URL, into the workspace.
 - Import geotagged drone photos as point layers, or orthorectify frames against
   a DEM into one orthomosaic COG (Orthority, AGPL-3.0-or-later).

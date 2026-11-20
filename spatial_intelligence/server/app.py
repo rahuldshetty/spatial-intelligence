@@ -17,6 +17,7 @@ from ..contracts.errors import ToolInputError, WorkspaceError
 from . import deps
 from .assets import WEB_DIR
 from .routers import (
+    data_sources,
     drone,
     events,
     files,
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     _register_error_handlers(app)
     app.include_router(state.router)
     app.include_router(tools.router)
+    app.include_router(data_sources.router)
     app.include_router(workflows.router)
     app.include_router(workspace.router)
     app.include_router(files.router)

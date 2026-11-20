@@ -18,12 +18,13 @@ from ..contracts.effects import READ_ONLY, Effect
 from ..contracts.services import VISION_SERVICE
 from .packs.ai import AIPack
 from .packs.capabilities import CapabilityPack
-from .packs.catalog import CatalogPack
 from .packs.conversation import ConversationPack
+from .packs.data import DataPack
 from .packs.detection import DetectionPack
 from .packs.files import FilesPack
 from .packs.interaction import InteractionPack
 from .packs.layers import LayersPack
+from .packs.places import PlacesPack
 from .packs.python_ import PythonPack
 from .packs.raster import RasterPack
 from .packs.segmentation import SegmentationPack
@@ -87,7 +88,8 @@ PACK_ORDER: tuple[type, ...] = (
     ConversationPack,
     # Orientation and data acquisition.
     FilesPack,
-    CatalogPack,
+    DataPack,
+    PlacesPack,
     # Map authoring, then image understanding when the model supports it.
     LayersPack,
     VisionPack,

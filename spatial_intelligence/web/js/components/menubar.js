@@ -7,6 +7,7 @@ import { el, toast } from "../dom.js";
 import { icon, menuLabel } from "../icons.js";
 import { addCell } from "../pages/cells.js";
 import { applySnapshot, setState, state } from "../store.js";
+import { openDataSourcesDialog } from "./data-sources-dialog.js";
 import { openSettingsDialog } from "./settings-dialog.js";
 import { openToolConfigDialog } from "./tool-config-dialog.js";
 import { openWorkflowDialog } from "./workflow-dialog.js";
@@ -53,6 +54,7 @@ function fileMenu() {
     el("div", { class: "separator" }),
     menuItem("settings", "Settings…", () => openSettingsDialog(), "Ctrl ,"),
     menuItem("sliders", "Tool Configuration…", () => openToolConfigDialog(), "Ctrl ⇧ ,"),
+    menuItem("database", "Data Sources…", () => openDataSourcesDialog(), "Ctrl ⇧ D"),
     el("div", { class: "separator" }),
     menuItem("power", "Close all workspaces", doCloseAll)
   );
@@ -97,6 +99,11 @@ function rightActions() {
   nodes.push(
     iconButton("sliders", "Tool Configuration", () => openToolConfigDialog(), {
       id: "tool-config-button",
+    })
+  );
+  nodes.push(
+    iconButton("database", "Data Sources", () => openDataSourcesDialog(), {
+      id: "data-sources-button",
     })
   );
   nodes.push(dangerToggle());

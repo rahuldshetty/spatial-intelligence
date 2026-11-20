@@ -227,44 +227,33 @@ CAPABILITIES: tuple[Capability, ...] = (
         tools=("run_python", "inspect_output", "query_output", "python_help"),
     ),
     Capability(
-        id="catalog.disaster-imagery",
-        title="Open disaster imagery",
-        summary="Search, download into data/, and map Vantor and OpenAerialMap disaster imagery.",
-        keywords=(
-            "disaster", "flood", "landslide", "earthquake", "before", "after",
-            "planet", "vantor", "aerial", "stac", "imagery",
+        id="data.sources",
+        title="Data source registry",
+        summary=(
+            "List enabled open-data sources, search them, and add their "
+            "datasets to the map: STAC, ArcGIS, GIBS, 3DEP, Vantor, OpenAerialMap."
         ),
-        implementation="backend using GeoLibre catalog contracts",
+        keywords=(
+            "data", "dataset", "catalog", "source", "search", "download",
+            "imagery", "satellite", "aerial", "elevation", "dem", "boundary",
+            "arcgis", "hub", "stac", "gibs", "nasa", "usgs", "vantor",
+            "openaerialmap", "flood", "disaster", "before", "after",
+        ),
+        implementation="backend using the data-source registry",
         tools=(
-            "search_vantor_events",
-            "search_vantor_imagery",
-            "search_openaerialmap",
-            "add_catalog_scene",
-            "download_catalog_scene",
+            "list_data_sources",
+            "describe_data_source",
+            "search_data",
+            "add_data",
+            "download_data",
         ),
         geolibre_plugins=(
+            "STAC Catalogs",
+            "ArcGIS Hub",
+            "NASA Earthdata",
             "Vantor Open Data",
             "OpenAerialMap",
         ),
-        status="available",
-    ),
-    Capability(
-        id="catalog.satellite-imagery",
-        title="Satellite imagery and elevation catalogs (STAC)",
-        summary="Search Sentinel, Landsat, NAIP, Sentinel-1, and DEM collections, then download and map the best scene.",
-        keywords=(
-            "satellite", "sentinel", "landsat", "naip", "hls", "dem", "elevation",
-            "stac", "catalog", "imagery", "reflectance", "ndvi", "sar", "multispectral",
-        ),
-        implementation="backend using the public STAC APIs GeoLibre's STAC panel browses",
-        tools=(
-            "list_stac_catalogs",
-            "search_stac_collections",
-            "search_stac_scenes",
-            "add_catalog_scene",
-            "download_catalog_scene",
-        ),
-        geolibre_plugins=("STAC Catalogs", "Planetary Computer"),
         status="available",
     ),
     Capability(
@@ -296,8 +285,9 @@ CAPABILITIES: tuple[Capability, ...] = (
             "Discovery of Planet's disaster releases is a GeoLibre panel, not a call "
             "this build can make: open the STAC Catalogs panel (Planet Open Data is "
             "the same panel pinned to Planet's releases), add the scenes you want, "
-            "then continue from the persisted map layers. Once a release or any other "
-            "catalog publishes a STAC API URL, pass it to search_stac_scenes instead."
+            "then continue from the persisted map layers. The enabled STAC source "
+            "covers Earth Search and Planetary Computer collections; use the panel "
+            "for a release that does not publish a searchable API."
         ),
     ),
     Capability(

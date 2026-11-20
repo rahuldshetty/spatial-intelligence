@@ -40,6 +40,7 @@ __all__ = [
     "add_tile_layer",
     "add_vector",
     "add_wms",
+    "add_wmts",
     "classify_layer",
     "clean_layer_name",
     "clear_layers",
@@ -448,6 +449,21 @@ def add_wms(
     layer_id = map_obj.add_wms(
         endpoint, layers, clean_layer_name(name), styles=styles or ""
     )
+    persist_map(map_obj, workspace)
+    return layer_id
+
+
+@locked
+def add_wmts(
+    workspace: Workspace,
+    map_obj: Map,
+    url: str,
+    name: str,
+    *,
+    tile_size: int = 256,
+) -> str:
+    """Add a WMTS tile layer from a ``{z}/{y}/{x}`` URL template."""
+    layer_id = map_obj.add_wmts(url, clean_layer_name(name), tile_size=tile_size)
     persist_map(map_obj, workspace)
     return layer_id
 

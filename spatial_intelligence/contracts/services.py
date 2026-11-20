@@ -12,9 +12,13 @@ MAP_BRIDGE_SERVICE = "map.bridge"
 #: The open workspace's searchable conversation index.
 CONVERSATION_SERVICE = "conversation.store"
 
+#: The configured data-source registry (providers plus enabled/disabled state).
+DATA_SOURCES_SERVICE = "data.sources"
+
 __all__ = [
     "CAPTURE_SERVICE",
     "CONVERSATION_SERVICE",
+    "DATA_SOURCES_SERVICE",
     "MAP_BRIDGE_SERVICE",
     "VISION_SERVICE",
 ]

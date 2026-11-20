@@ -18,6 +18,7 @@ from spatial_intelligence.data_sources import (
 )
 from spatial_intelligence.data_sources.providers.arcgis import ArcGISSource
 from spatial_intelligence.data_sources.providers.gibs import GIBSSource, reset_cache
+from spatial_intelligence.data_sources.text import clean_text
 from spatial_intelligence.map import document, layers
 from spatial_intelligence.tools import ToolRegistry, ToolRuntime
 from spatial_intelligence.tools.packs.data import DataPack
@@ -66,6 +67,18 @@ class WorkspaceCase(unittest.TestCase):
 
     def registry(self, *sources) -> DataSourceRegistry:
         return DataSourceRegistry(list(sources))
+
+
+class TextCleanerTests(unittest.TestCase):
+    def test_strips_tags_entities_and_scripts(self):
+        self.assertEqual(
+            clean_text("<p>Hello&nbsp;<strong>world</strong></p><script>bad()</script>"),
+            "Hello world",
+        )
+
+    def test_keeps_plain_text_and_truncates_after_cleaning(self):
+        self.assertEqual(clean_text("Tom &amp; Jerry"), "Tom & Jerry")
+        self.assertEqual(clean_text("<p>" + "x" * 20 + "</p>", limit=8), "x" * 8)
 
 
 class RegistryTests(WorkspaceCase):
@@ -220,6 +233,7 @@ class ArcGISAdapterTests(WorkspaceCase):
             "url": "https://services.example/FeatureServer",
             "extent": [[-90.0, 29.0], [-89.0, 30.0]],
             "licenseInfo": "Public domain",
+            "description": "<p>Hello&nbsp;<strong>parcels</strong></p><script>bad()</script>",
         }
         service = {"layers": [{"id": 0, "name": "Parcels"}]}
 
@@ -240,6 +254,7 @@ class ArcGISAdapterTests(WorkspaceCase):
         dataset = page.datasets[0]
         self.assertEqual(dataset.id, "item-1:0")
         self.assertEqual(dataset.kind, "vector")
+        self.assertEqual(dataset.description, "Hello parcels")
         self.assertIn("/0/query", dataset.assets[0].href)
         self.assertEqual(spec.kind, "vector")
         self.assertIn("arcgis_feature", spec.options)
@@ -289,7 +304,7 @@ class DataPackTests(WorkspaceCase):
                 {
                     "_id": "oam-1",
                     "uuid": "https://example.com/aerial.tif",
-                    "title": "Flood survey",
+                    "title": "<b>Flood</b> survey",
                     "provider": "Example",
                     "bbox": [85.0, 27.0, 86.0, 28.0],
                     "acquisition_end": "2026-01-01T00:00:00Z",
@@ -309,6 +324,7 @@ class DataPackTests(WorkspaceCase):
         dataset = page["datasets"][0]
         self.assertEqual(dataset["id"], "oam-1")
         self.assertEqual(dataset["key"], "openaerialmap:oam-1")
+        self.assertEqual(dataset["title"], "Flood survey")
 
         with patch("urllib.request.urlopen", side_effect=open_url):
             added = tools.get("add_data").callable("openaerialmap", "oam-1")

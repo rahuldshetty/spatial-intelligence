@@ -367,13 +367,16 @@ export function openDataSourcesDialog() {
       const common = el("div", { class: "data-sources-fields" });
       node.append(common);
 
+      const shortFields = [];
+      const wideFields = [];
+
       const textInput = el("input", {
         type: "search",
         placeholder: "Search terms (optional)",
         autocomplete: "off",
         "aria-label": "Search terms",
       });
-      common.append(field("Search", textInput, "Optional for every source."));
+      shortFields.push(field("Search", textInput, "Optional for every source.", "search"));
 
       const limitInput = el("input", {
         type: "number",
@@ -383,16 +386,22 @@ export function openDataSourcesDialog() {
         value: "20",
         "aria-label": "Result limit",
       });
-      common.append(field("Limit", limitInput, ""));
+      shortFields.push(field("Limit", limitInput, "", "limit"));
 
+      const wideKinds = new Set(["multiselect", "bbox", "daterange"]);
       for (const spec of source.filters || []) {
         const control = buildFilter(spec);
         if (!control) continue;
         controls.push(control);
         controlsByName.set(spec.name, control);
-        if (!spec.hidden) {
-          common.append(field(spec.label, control.node, spec.help || ""));
-        }
+        if (spec.hidden) continue;
+        const node = field(
+          spec.label,
+          control.node,
+          spec.help || "",
+          wideKinds.has(spec.kind) ? "full" : ""
+        );
+        (wideKinds.has(spec.kind) ? wideFields : shortFields).push(node);
       }
 
       let startInput = null;
@@ -403,7 +412,7 @@ export function openDataSourcesDialog() {
         endInput = el("input", { type: "date", "aria-label": "End date" });
         const dates = el("div", { class: "data-sources-dates" });
         dates.append(startInput, endInput);
-        common.append(field("Dates", dates, "Optional; YYYY-MM-DD."));
+        shortFields.push(field("Dates", dates, "Optional; YYYY-MM-DD."));
       }
 
       let bboxInputs = null;
@@ -428,16 +437,20 @@ export function openDataSourcesDialog() {
             input,
           ]));
         }
-        common.append(
+        wideFields.push(
           field(
             "Area (W, S, E, N)",
             bboxRow,
             bboxMode === "required"
               ? "Required for this source."
-              : "All four values or leave blank."
+              : "All four values or leave blank.",
+            "full"
           )
         );
       }
+
+      for (const node of shortFields) common.append(node);
+      for (const node of wideFields) common.append(node);
 
       const submit = el("button", {
         class: "primary",
@@ -626,8 +639,10 @@ export function openDataSourcesDialog() {
       };
     }
 
-    function field(label, control, hint) {
-      const wrapper = el("label", { class: "data-sources-field" });
+    function field(label, control, hint, className = "") {
+      const wrapper = el("label", {
+        class: "data-sources-field" + (className ? " " + className : ""),
+      });
       wrapper.append(el("span", { class: "data-sources-field-label", text: label }), control);
       if (hint) wrapper.append(el("span", { class: "data-sources-field-hint", text: hint }));
       return wrapper;
@@ -718,7 +733,7 @@ export function openDataSourcesDialog() {
           type: "button",
           class: "data-sources-more",
           text: "Load more",
-          onclick: () => loadMore(source),
+          onclick: () => loadMore(source, more),
         });
         resultsNode.append(more);
       }
@@ -877,10 +892,15 @@ export function openDataSourcesDialog() {
       }
     }
 
-    async function loadMore(source) {
+    async function loadMore(source, button) {
       if (busy || !lastQuery || !results?.next_cursor) return;
       busy = true;
-      setStatus("Loading more…");
+      button.disabled = true;
+      button.classList.add("loading");
+      button.replaceChildren(
+        el("span", { class: "data-sources-spinner" }),
+        document.createTextNode("Loading…")
+      );
       try {
         const body = { ...lastQuery, cursor: results.next_cursor };
         const page = await searchDataSource(source.id, body);
@@ -891,6 +911,9 @@ export function openDataSourcesDialog() {
         drawResults(source, results);
       } catch (error) {
         setStatus(error.message || String(error), "error");
+        button.disabled = false;
+        button.classList.remove("loading");
+        button.replaceChildren(document.createTextNode("Load more"));
       } finally {
         busy = false;
       }

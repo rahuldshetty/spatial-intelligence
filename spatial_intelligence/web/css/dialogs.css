@@ -2456,15 +2456,28 @@
 
 .data-sources-fields {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 8px 14px;
 }
 
 .data-sources-field {
   display: flex;
   min-width: 0;
+  grid-column: span 4;
   flex-direction: column;
   gap: 4px;
+}
+
+.data-sources-field.search {
+  grid-column: span 6;
+}
+
+.data-sources-field.limit {
+  grid-column: span 2;
+}
+
+.data-sources-field.full {
+  grid-column: 1 / -1;
 }
 
 .data-sources-field-label {
@@ -2679,6 +2692,16 @@
   .data-sources-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .data-sources-field,
+  .data-sources-field.search,
+  .data-sources-field.limit {
+    grid-column: span 1;
+  }
+
+  .data-sources-field.full {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 760px) {
@@ -2742,4 +2765,15 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+.data-sources-more.loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.data-sources-more:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }

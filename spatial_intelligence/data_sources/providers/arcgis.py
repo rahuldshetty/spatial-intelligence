@@ -27,6 +27,7 @@ from ..base import (
     SourceDescriptor,
     filter_list,
 )
+from ..text import clean_text
 
 #: Public ArcGIS Online search endpoint.
 ARCGIS_SEARCH = "https://www.arcgis.com/sharing/rest/search"
@@ -423,7 +424,9 @@ class ArcGISSource(DataSource):
             id=dataset_id,
             title=title,
             kind=kind,
-            description=str(item.get("snippet") or item.get("description") or "")[:500],
+            description=clean_text(
+                item.get("snippet") or item.get("description") or "", limit=500
+            ),
             bbox=bbox,
             datetime=_item_datetime(item.get("modified")),
             thumbnail_url=item.get("thumbnail"),

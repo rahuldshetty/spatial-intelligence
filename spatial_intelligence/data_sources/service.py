@@ -22,6 +22,7 @@ from ..workspace import Workspace
 from ..workspace import files as fileops
 from .base import Asset, DataQuery, Dataset, LayerSpec, SearchPage, validate_bbox
 from .cache import DatasetCache
+from .text import clean_dataset
 from .registry import DataSourceRegistry
 
 #: Most datasets one query may return.
@@ -108,9 +109,10 @@ class DataService:
         source = self._registry.get(source_id, enabled_only=True)
         normalized = self._normalize_query(query)
         page = source.search(normalized)
-        self._cache.remember_all(page.datasets)
+        cleaned = tuple(clean_dataset(dataset) for dataset in page.datasets)
+        self._cache.remember_all(cleaned)
         return SearchPage(
-            datasets=tuple(source.present(dataset) for dataset in page.datasets),
+            datasets=tuple(source.present(dataset) for dataset in cleaned),
             total=page.total,
             next_cursor=page.next_cursor,
         )
@@ -223,9 +225,12 @@ class DataService:
             dataset_id = dataset_id[len(prefix) :]
         key = f"{source.descriptor.id}:{dataset_id}"
         dataset = self._cache.get(key)
+        if dataset is not None:
+            dataset = clean_dataset(dataset)
         if dataset is None:
             dataset = source.get(dataset_id)
             if dataset is not None:
+                dataset = clean_dataset(dataset)
                 self._cache.remember(dataset)
         if dataset is None:
             raise ToolInputError(

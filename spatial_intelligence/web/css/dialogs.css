@@ -173,6 +173,23 @@
   resize: vertical;
 }
 
+/* Native option popups can ignore the select's inherited color on hover;
+   state both explicitly so light mode never lands on white-on-white. */
+#dialog select option,
+#dialog select optgroup {
+  color: var(--text);
+  background: var(--surface);
+}
+
+#dialog select option:checked {
+  color: var(--text);
+  background: var(--primary-soft);
+}
+
+#dialog select option:disabled {
+  color: var(--text-3);
+}
+
 #dialog input:focus,
 #dialog select:focus,
 #dialog textarea:focus {

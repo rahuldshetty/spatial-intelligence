@@ -41,7 +41,16 @@ class ManagerTestCase(unittest.TestCase):
         self.twin = dataclasses.replace(
             catalog.SLIMSAM, id=TWIN, repo="example/twin", revision="rev2", files=()
         )
-        self._catalog = patch.object(catalog, "MODELS", (catalog.SLIMSAM, self.twin))
+        self.transient = dataclasses.replace(
+            catalog.SLIMSAM,
+            id="transient",
+            task="super-resolution",
+            files=(),
+            unload_when_idle=True,
+        )
+        self._catalog = patch.object(
+            catalog, "MODELS", (catalog.SLIMSAM, self.twin, self.transient)
+        )
         self._catalog.start()
         self.loads: list[str] = []
         self._downloaded = patch.object(store, "is_downloaded", lambda spec: True)
@@ -111,6 +120,17 @@ class ResidencyTests(ManagerTestCase):
             pass
 
         self.assertEqual(manager.loaded_ids(), [TWIN])
+
+    def test_a_transient_model_is_unloaded_when_its_last_reservation_ends(self):
+        manager = ModelManager()
+
+        with manager.reserve("transient"):
+            self.assertEqual(manager.loaded_ids(), ["transient"])
+        self.assertEqual(manager.loaded_ids(), [])
+
+        with manager.reserve("transient"):
+            pass
+        self.assertEqual(self.loads, ["transient", "transient"])
 
     def test_embeddings_are_cached_within_a_cap(self):
         session = self._fake_load(catalog.find(MODEL))

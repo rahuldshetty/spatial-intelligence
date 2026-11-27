@@ -66,6 +66,7 @@ EXPECTED_CATEGORY_COUNTS = {
     "search": 1,
     "segmentation": 1,
     "skills": 1,
+    "super-resolution": 1,
     "vector": 25,
     "vision": 1,
     "web": 1,
@@ -94,7 +95,7 @@ class ManifestTestCase(unittest.TestCase):
 
 class ManifestTests(ManifestTestCase):
     def test_every_tool_is_registered_with_a_category(self):
-        self.assertEqual(len(self.registry), 103)
+        self.assertEqual(len(self.registry), 104)
         counted = {
             category: len(names)
             for category, names in self.registry.categories().items()
@@ -157,7 +158,7 @@ class ManifestTests(ManifestTestCase):
 
     def test_implemented_tools_exclude_foreign_ones(self):
         implemented = {spec.name for spec in self.registry.implemented()}
-        self.assertEqual(len(implemented), 95)
+        self.assertEqual(len(implemented), 96)
         self.assertNotIn(TOOL_SEARCH_NAME, implemented)
         for name in PLAN_TOOL_NAMES:
             self.assertNotIn(name, implemented)
@@ -213,6 +214,12 @@ EXPECTED_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "ai_pull_model",
         "ai_unload_model",
         "segment_image",
+    ),
+    "imagery.super-resolution": (
+        "ai_models",
+        "ai_pull_model",
+        "ai_unload_model",
+        "super_resolve",
     ),
     "workspace.files": (
         "list_files",

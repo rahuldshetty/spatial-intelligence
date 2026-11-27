@@ -11,7 +11,8 @@ stay resident whether or not anything is being segmented. This holds the line:
   background thread: the only entry point is a tool call, so there is nothing
   to do between calls, and no thread to stop at shutdown.
 - **A reservation is a promise** — a model being used is never evicted, even
-  when it is over the cap or past its TTL.
+  when it is over the cap or past its TTL. A model whose spec sets
+  ``unload_when_idle`` is dropped the moment its last reservation ends.
 
 ``reserve`` is the whole lifecycle: with it, a caller gets a loaded session and
 the guarantee that nothing unloads it while the block runs.
@@ -155,6 +156,8 @@ class ModelManager:
             with self._lock:
                 session.refcount -= 1
                 session.last_used = time.monotonic()
+                if session.refcount == 0 and spec.unload_when_idle:
+                    self._sessions.pop(spec.id, None)
 
     def _acquire(self, spec: ModelSpec) -> ModelSession:
         """Return a loaded session for ``spec``, loading or evicting as needed."""

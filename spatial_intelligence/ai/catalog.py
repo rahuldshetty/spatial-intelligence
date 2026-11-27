@@ -49,6 +49,11 @@ class ModelSpec:
     the reference preprocessing for the DETR family. ``labels`` are the class
     names in model order, so a detection result can be named without carrying a
     second table beside the catalog.
+
+    A super-resolution model carries ``scale``, the number of ``dates`` its
+    graph takes, and the per-date ``input_bands`` in model order. Its graph is
+    unloaded as soon as the last reservation ends when ``unload_when_idle`` is
+    set, because one variant is large and runs are sparse.
     """
 
     id: str
@@ -64,6 +69,10 @@ class ModelSpec:
     labels: tuple[str, ...] = ()
     shortest_edge: int = 0
     longest_edge: int = 0
+    scale: int = 1
+    dates: int = 1
+    input_bands: tuple[str, ...] = ()
+    unload_when_idle: bool = False
 
     @property
     def total_bytes(self) -> int:
@@ -144,8 +153,131 @@ YOLOS_TINY = ModelSpec(
     ),
 )
 
+#: Satlas ESRGAN ONNX exports, published from the upstream Apache-2.0 weights.
+#: One graph per variant; the 4x scale and date-major bands are the only
+#: architecture facts the pipeline needs.
+SATLAS_REPO = "rahuldshetty/satlas-esrgan-onnx"
+SATLAS_REVISION = "d0a4811582990b18056eac0b02dd5d03c7bb8363"
+
+_SATLAS_RGB = ("tci", "tci", "tci")
+_SATLAS_10M = _SATLAS_RGB + ("b08",)
+_SATLAS_20M = _SATLAS_10M + ("b05", "b06", "b07", "b11", "b12")
+_SATLAS_60M = _SATLAS_RGB + ("b01", "b08", "b09", "b10", "b05", "b06", "b07", "b11", "b12")
+
+
+def _satlas(
+    model_id: str,
+    *,
+    file: str,
+    sha256: str,
+    size: int,
+    dates: int,
+    input_bands: tuple[str, ...],
+    notes: str,
+) -> ModelSpec:
+    """One Satlas ONNX variant, pinned to the published Hub revision."""
+    return ModelSpec(
+        id=model_id,
+        repo=SATLAS_REPO,
+        revision=SATLAS_REVISION,
+        files=(ModelFile(path=file, sha256=sha256, size=size),),
+        task="super-resolution",
+        prompts=(),
+        scale=4,
+        dates=dates,
+        input_bands=input_bands,
+        unload_when_idle=True,
+        license="apache-2.0",
+        notes=notes,
+    )
+
+
+SATLAS_ESRGAN_1S2 = _satlas(
+    "satlas-esrgan-1s2",
+    file="esrgan_1S2.onnx",
+    sha256="579a24618dbf552358a9d95b2593023dbeddbeabd2581fcd84a5e77d1cd983de",
+    size=67_051_616,
+    dates=1,
+    input_bands=_SATLAS_RGB,
+    notes="Satlas ESRGAN, 4x, single-date TCI RGB. The default: 67 MB, ONNX.",
+)
+SATLAS_ESRGAN_2S2 = _satlas(
+    "satlas-esrgan-2s2",
+    file="esrgan_2S2.onnx",
+    sha256="3c297d6e6ea0ae0858a9af5000baeef60845c1f7f87e988393af8aa3d9aa47c9",
+    size=67_058_528,
+    dates=2,
+    input_bands=_SATLAS_RGB,
+    notes="Satlas ESRGAN, 4x, two co-registered TCI dates.",
+)
+SATLAS_ESRGAN_4S2 = _satlas(
+    "satlas-esrgan-4s2",
+    file="esrgan_4S2.onnx",
+    sha256="980723d4e0bede5077a9c5a37cb3675b8339ecb33e8639a0f4845402f605b4c5",
+    size=67_072_354,
+    dates=4,
+    input_bands=_SATLAS_RGB,
+    notes="Satlas ESRGAN, 4x, four co-registered TCI dates.",
+)
+SATLAS_ESRGAN_8S2 = _satlas(
+    "satlas-esrgan-8s2",
+    file="esrgan_8S2.onnx",
+    sha256="1e35b59a5cbe2b4d2622f2bf3695410e4331aa0e1761ed3fb654d384f26be540",
+    size=67_100_002,
+    dates=8,
+    input_bands=_SATLAS_RGB,
+    notes="Satlas ESRGAN, 4x, eight co-registered TCI dates.",
+)
+SATLAS_ESRGAN_16S2 = _satlas(
+    "satlas-esrgan-16s2",
+    file="esrgan_16S2.onnx",
+    sha256="6dced05737d9d0194fe538ae882b7a260e77fb37e49569be4a19e717320f0a6c",
+    size=67_155_298,
+    dates=16,
+    input_bands=_SATLAS_RGB,
+    notes="Satlas ESRGAN, 4x, sixteen co-registered TCI dates.",
+)
+SATLAS_ESRGAN_10M = _satlas(
+    "satlas-esrgan-10m",
+    file="esrgan_10m.onnx",
+    sha256="265f6f7813372bb5d9718fe171414657a0d69807a73e6e52f360c793246cf162",
+    size=67_118_434,
+    dates=8,
+    input_bands=_SATLAS_10M,
+    notes="Satlas ESRGAN, 4x, eight dates of TCI RGB + B08.",
+)
+SATLAS_ESRGAN_20M = _satlas(
+    "satlas-esrgan-20m",
+    file="esrgan_20m.onnx",
+    sha256="6249a24d3e42147877dc14512044f3455f6d593a3a26eda806153005ea0dd529",
+    size=67_210_594,
+    dates=8,
+    input_bands=_SATLAS_20M,
+    notes="Satlas ESRGAN, 4x, eight dates of TCI RGB + B08/B05/B06/B07/B11/B12.",
+)
+SATLAS_ESRGAN_60M = _satlas(
+    "satlas-esrgan-60m",
+    file="esrgan_60m.onnx",
+    sha256="98d6c2661d2f4bcc2e3d2b06a9e5eb8c8f08c22abdce498b7b31a307e99157d1",
+    size=67_265_890,
+    dates=8,
+    input_bands=_SATLAS_60M,
+    notes="Satlas ESRGAN, 4x, eight dates of TCI RGB + B01/B05/B06/B07/B08/B09/B10/B11/B12.",
+)
+
 #: Everything this build can run, best default first.
-MODELS: tuple[ModelSpec, ...] = (SLIMSAM, YOLOS_TINY)
+MODELS: tuple[ModelSpec, ...] = (
+    SLIMSAM,
+    YOLOS_TINY,
+    SATLAS_ESRGAN_1S2,
+    SATLAS_ESRGAN_2S2,
+    SATLAS_ESRGAN_4S2,
+    SATLAS_ESRGAN_8S2,
+    SATLAS_ESRGAN_16S2,
+    SATLAS_ESRGAN_10M,
+    SATLAS_ESRGAN_20M,
+    SATLAS_ESRGAN_60M,
+)
 
 
 def find(model_id: str) -> ModelSpec:

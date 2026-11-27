@@ -199,6 +199,22 @@ CAPABILITIES: tuple[Capability, ...] = (
         tools=("ai_models", "ai_pull_model", "ai_unload_model", "detect_objects"),
     ),
     Capability(
+        id="imagery.super-resolution",
+        title="Local 4x super-resolution (Satlas ESRGAN)",
+        summary=(
+            "Upscale Sentinel-2 or aerial RGB imagery 4x on this machine with "
+            "Satlas ESRGAN, optionally from 2-16 co-registered dates. Output is "
+            "2.5 m RGB for 10 m input; detail is generated, not measured."
+        ),
+        keywords=(
+            "super", "resolution", "super-resolution", "superresolution", "upscale",
+            "upsample", "enhance", "sharpen", "detail", "4x", "esrgan", "satlas",
+            "2.5m", "pixel",
+        ),
+        implementation="backend (ONNX Runtime, models cached under .models)",
+        tools=("ai_models", "ai_pull_model", "ai_unload_model", "super_resolve"),
+    ),
+    Capability(
         id="ai.sandbox-packages",
         title="Heavy geospatial AI libraries in the sandbox",
         summary=(

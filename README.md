@@ -39,9 +39,9 @@ every output is a real file in the workspace you can inspect or reuse.
 
 **🤖 Local AI models**
 
-- Segmentation (SAM family) and object detection (COCO) run locally on ONNX
-  Runtime — no service to stand up. Models download once into `.models/` and are
-  unloaded when idle.
+- Segmentation (SAM family), object detection (COCO), and 4x super-resolution
+  (Satlas ESRGAN) run locally on ONNX Runtime — no service to stand up. Models
+  download once into `.models/` and are unloaded when idle.
 - Heavy research libraries (torchgeo, terratorch, torch) can be exposed to the
   Python sandbox; the agent reads their API references on demand and writes its
   own inference code, so new models need no new tool.
@@ -144,7 +144,7 @@ The browser opens at `http://127.0.0.1:8000`.
 
 Notes: the first start downloads the pinned `marked` bundle for the UI (cached
 afterwards). Local AI models download on first use — about 40 MB for
-segmentation, 26 MB for detection.
+segmentation, 26 MB for detection, 67 MB per super-resolution variant.
 
 ## ⚙️ Configuration
 

@@ -29,6 +29,7 @@ from .packs.python_ import PythonPack
 from .packs.raster import RasterPack
 from .packs.segmentation import SegmentationPack
 from .packs.skills import SkillsPack
+from .packs.superres import SuperResolutionPack
 from .packs.vector import VectorPack
 from .packs.vision import VisionPack
 from .registry import PLAN_MUTATION_TAG, ToolRegistry
@@ -100,6 +101,7 @@ PACK_ORDER: tuple[type, ...] = (
     AIPack,
     SegmentationPack,
     DetectionPack,
+    SuperResolutionPack,
     PythonPack,
     SkillsPack,
 )

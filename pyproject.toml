@@ -43,6 +43,11 @@ dependencies = [
   # `onnxruntime-gpu` provides the same import where CUDA is wanted; install one
   # or the other, never both.
   "onnxruntime>=1.20",
+  # Built-in Sentinel-2 super-resolution (super_resolve). The official OpenSR
+  # SRGAN package is pinned to its release commit and pulls torch; the tool is
+  # presented as built in, so this is a main dependency rather than an extra.
+  # opensr-srgan requires Python 3.12; on 3.11 the tool reports the missing package.
+  "opensr-srgan @ git+https://github.com/ESAOpenSR/SRGAN.git@d8cc92538be9cdf101c11441761b6c7c11e01187 ; python_version >= '3.12'",
   # Drone orthorectification. A main dependency because the importer presents
   # "Build an orthomosaic" as a built-in action, not an optional feature. It is
   # AGPL-3.0-or-later and pulls the GUI OpenCV wheel; the AppImage build swaps
@@ -63,10 +68,9 @@ Issues = "https://github.com/spatialint-org/spatial-intelligence/issues"
 
 [project.optional-dependencies]
 # Heavy research libraries for the run_python sandbox, which `skill()` documents.
-# One extra, deliberately: torch alone is a 124 MB wheel (and far more installed),
-# and a CUDA machine needs torch from the CUDA index rather than the CPU wheel a
-# plain dependency would pin — so this stays something the user opts into, with
-# the index they actually want. `pip install -e ".[geoai]"` takes the CPU wheel.
+# The super-resolution tool already pulls torch through opensr-srgan; this extra
+# remains for torchgeo/terratorch and a sandbox torch the user can pin to a CUDA
+# index. `pip install -e ".[geoai]"` takes the default wheel.
 # terratorch 1.2.x pins torchgeo<0.10; torchgeo 0.9 is py3.12+, so 3.11 keeps
 # terratorch<1.2.12 and torchgeo 0.8.
 geoai = [

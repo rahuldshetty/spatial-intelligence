@@ -35,7 +35,7 @@ PIPELINE_TASKS = {
 PROMPT_TASKS = frozenset({"segmentation", "detection"})
 
 #: Weight kinds we can load, with what loading them takes.
-ROUTES = ("onnx", "torchgeo", "terratorch", "transformers", "research", "unusable")
+ROUTES = ("onnx", "opensr", "torchgeo", "terratorch", "transformers", "research", "unusable")
 
 _HUB_PREFIX = "hf:"
 _lock = threading.Lock()
@@ -162,18 +162,19 @@ def from_catalog(model_id: str) -> Profile | None:
     for spec in catalog.MODELS:
         if spec.id != model_id:
             continue
+        runtime = "OpenSR SRGAN (PyTorch)" if spec.runtime == "opensr" else "ONNX Runtime"
         return Profile(
             ref=spec.id,
             repo=spec.repo,
             revision=spec.revision,
-            route="onnx",
+            route="opensr" if spec.runtime == "opensr" else "onnx",
             tasks=(spec.task,),
             labels=_clean_labels(spec.labels),
             promptable=bool(spec.prompts),
             runnable=True,
             source="catalog",
             reason=(
-                f"Built in: {spec.task} on ONNX Runtime, {spec.total_bytes / 1_000_000:.0f} MB, "
+                f"Built in: {spec.task} on {runtime}, {spec.total_bytes / 1_000_000:.0f} MB, "
                 f"{spec.license}. No download until the first run."
             ),
         )

@@ -50,9 +50,9 @@ class AIPack:
         Files land under ``<GEOAI_HOME>/.models`` and are checked against the
         sha256 recorded in the catalog, so a rerun skips what is already there;
         set verify=True to re-hash the files on disk. Sizes: slimsam-77 is about
-        40 MB, yolos-tiny about 26 MB, and each Satlas ESRGAN variant about
-        67 MB. The task tools download on their own when a model is missing, so
-        this is only needed to fetch ahead of time or to repair a bad file.
+        40 MB, yolos-tiny about 26 MB, and sen2-sr about 68 MB. The task tools
+        download on their own when a model is missing, so this is only needed to
+        fetch ahead of time or to repair a bad file.
         """
         spec = find_model(model_id)
         job = self._rt.reporter.job(

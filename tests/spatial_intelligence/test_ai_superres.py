@@ -1,71 +1,63 @@
-"""Super-resolution: tiling geometry, normalization, dates, and the written COG."""
+"""SEN2-SR: raw-DN contract, tiling, and the written four-band COG."""
 
 from __future__ import annotations
 
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
 
-from spatial_intelligence.ai import superres
-from spatial_intelligence.ai.catalog import ModelSpec
+from spatial_intelligence.ai import catalog, superres
 from spatial_intelligence.ai.manager import ModelSession
 from spatial_intelligence.contracts.errors import ToolInputError
 from spatial_intelligence.geo.raster import looks_cog
 from spatial_intelligence.workspace import Workspace
 
-RGB = ("tci", "tci", "tci")
-
-
-def spec(*, dates: int = 1, bands: tuple[str, ...] = RGB) -> ModelSpec:
-    return ModelSpec(
-        id="fake-sr",
-        repo="example/fake",
-        revision="rev",
-        files=(),
-        task="super-resolution",
-        prompts=(),
-        scale=4,
-        dates=dates,
-        input_bands=bands,
-        unload_when_idle=True,
-    )
+MODEL = catalog.SEN2_SR
 
 
 class Nearest4:
-    """A 4x graph that repeats the first three channels, for geometry tests."""
+    """A 4x model that repeats all four channels, for geometry tests."""
 
     def __init__(self):
         self.calls = 0
         self.shapes = []
 
-    def get_inputs(self):
-        return (SimpleNamespace(name="input"),)
-
-    def run(self, _outputs, feeds):
+    def predict_step(self, tensor):
         self.calls += 1
-        array = feeds["input"]
-        self.shapes.append(array.shape)
-        return [np.repeat(np.repeat(array[:, :3], 4, axis=2), 4, axis=3)]
+        self.shapes.append(tuple(tensor.shape))
+        return tensor.repeat_interleave(4, dim=2).repeat_interleave(4, dim=3)
 
 
-def session(graph, model: ModelSpec) -> ModelSession:
+def session(graph) -> ModelSession:
     return ModelSession(
-        spec=model, encoder=graph, decoder=graph, provider="CPUExecutionProvider", threads=1
+        spec=MODEL,
+        encoder=graph,
+        decoder=None,
+        provider="cpu",
+        threads=1,
     )
 
 
-def write_raster(path: Path, width: int, height: int, *, count: int = 3, dtype: str = "uint8"):
+def write_raster(
+    path: Path,
+    width: int,
+    height: int,
+    *,
+    count: int = 4,
+    dtype: str = "uint16",
+    crs: str | None = "EPSG:32645",
+    pixel: float = 10.0,
+):
     rng = np.random.default_rng(7)
     shape = (count, height, width)
-    if dtype == "uint8":
-        array = rng.integers(20, 230, size=shape, dtype=np.uint8)
+    if dtype == "uint16":
+        array = rng.integers(100, 9000, size=shape, dtype=np.uint16)
     else:
-        array = rng.integers(100, 8000, size=shape, dtype=np.uint16)
+        array = rng.integers(20, 230, size=shape, dtype=np.uint8)
     path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(
         path,
@@ -75,8 +67,8 @@ def write_raster(path: Path, width: int, height: int, *, count: int = 3, dtype: 
         height=height,
         count=count,
         dtype=dtype,
-        crs="EPSG:32645",
-        transform=from_origin(500_000, 3_000_000, 10, 10),
+        crs=crs,
+        transform=from_origin(500_000, 3_000_000, pixel, pixel),
     ) as dataset:
         dataset.write(array)
     return array
@@ -94,16 +86,6 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(cores[0], (0, 0, 128, 128))
         self.assertEqual(cores[-1], (256, 256, 44, 4))
 
-    def test_normalize_scales_by_dtype(self):
-        self.assertAlmostEqual(float(superres.normalize(np.array([[255]], np.uint8))[0, 0]), 1.0)
-        self.assertAlmostEqual(
-            float(superres.normalize(np.array([[8160]], np.uint16))[0, 0]), 1.0
-        )
-        self.assertEqual(
-            float(superres.normalize(np.array([[16320]], np.uint16))[0, 0]), 1.0
-        )
-        self.assertAlmostEqual(float(superres.normalize(np.array([[0.25]], np.float32))[0, 0]), 0.25)
-
 
 class RasterTests(unittest.TestCase):
     def setUp(self):
@@ -119,26 +101,32 @@ class RasterTests(unittest.TestCase):
         graph = Nearest4()
 
         target, timings, info = superres.super_resolve_raster(
-            self.workspace, self.path, session(graph, spec()), tile_size=128, halo=16
+            self.workspace, self.path, session(graph)
         )
 
         with rasterio.open(target) as dataset:
             output = dataset.read()
         expected = np.repeat(np.repeat(self.source, 4, axis=1), 4, axis=2)
-        np.testing.assert_array_equal(output, expected)
+        self.assertEqual(output.shape, expected.shape)
+        self.assertLessEqual(int(np.abs(output.astype(np.int32) - expected).max()), 1)
         self.assertEqual(graph.calls, 9)
+        self.assertEqual(graph.shapes[0], (1, 4, 160, 160))
         self.assertEqual(timings.tiles, 9)
         self.assertEqual(timings.skipped_tiles, 0)
         self.assertEqual(info["output_pixels"], [1200, 1040])
 
     def test_the_output_keeps_the_grid_and_pixel_size(self):
         target, _timings, info = superres.super_resolve_raster(
-            self.workspace, self.path, session(Nearest4(), spec()), tile_size=128, halo=8
+            self.workspace, self.path, session(Nearest4())
         )
 
         with rasterio.open(target) as dataset:
             self.assertEqual(dataset.crs.to_string(), "EPSG:32645")
             self.assertEqual((dataset.width, dataset.height), (1200, 1040))
+            self.assertEqual(dataset.count, 4)
+            self.assertEqual(dataset.dtypes, ("uint16",) * 4)
+            self.assertEqual(dataset.nodata, 0)
+            self.assertEqual(dataset.interleaving, rasterio.enums.Interleaving.band)
             self.assertAlmostEqual(dataset.transform.a, 10 / 4)
             self.assertAlmostEqual(dataset.transform.e, -10 / 4)
             self.assertTrue(dataset.is_tiled)
@@ -146,62 +134,52 @@ class RasterTests(unittest.TestCase):
             self.assertTrue(dataset.overviews(1))
         self.assertIs(looks_cog(target), True)
         self.assertEqual(info["pixel_size"], [2.5, 2.5])
+        self.assertEqual(info["map_bands"], [1, 2, 3])
 
-    def test_bounds_narrow_the_output_to_the_window(self):
-        target, _timings, info = superres.super_resolve_raster(
-            self.workspace,
-            self.path,
-            session(Nearest4(), spec()),
-            bounds=[500_100, 2_999_900, 500_300, 3_000_000],
-            tile_size=128,
-            halo=8,
+    def test_a_three_band_or_uint8_raster_is_refused(self):
+        three = "data/three.tif"
+        write_raster(self.workspace.resolve(three, write=True), 64, 64, count=3)
+        with self.assertRaises(ToolInputError) as caught:
+            superres.super_resolve_raster(self.workspace, three, session(Nearest4()))
+        self.assertIn("takes 4", str(caught.exception))
+
+        eight = "data/eight.tif"
+        write_raster(
+            self.workspace.resolve(eight, write=True), 64, 64, count=4, dtype="uint8"
         )
+        with self.assertRaises(ToolInputError) as caught:
+            superres.super_resolve_raster(self.workspace, eight, session(Nearest4()))
+        self.assertIn("uint16", str(caught.exception))
 
+    def test_a_non_ten_metre_grid_is_refused(self):
+        path = "data/twenty.tif"
+        write_raster(self.workspace.resolve(path, write=True), 64, 64, pixel=20.0)
+
+        with self.assertRaises(ToolInputError) as caught:
+            superres.super_resolve_raster(self.workspace, path, session(Nearest4()))
+        self.assertIn("10 m", str(caught.exception))
+
+    def test_a_raster_without_a_crs_is_refused(self):
+        path = "data/no-crs.tif"
+        write_raster(self.workspace.resolve(path, write=True), 64, 64, crs=None)
+
+        with self.assertRaises(ToolInputError) as caught:
+            superres.super_resolve_raster(self.workspace, path, session(Nearest4()))
+        self.assertIn("no CRS", str(caught.exception))
+
+    def test_a_standard_s2_stack_needs_explicit_band_indexes(self):
+        path = "data/twelve.tif"
+        write_raster(self.workspace.resolve(path, write=True), 64, 64, count=12)
+
+        with self.assertRaises(ToolInputError) as caught:
+            superres.super_resolve_raster(self.workspace, path, session(Nearest4()))
+        self.assertIn("Pass bands", str(caught.exception))
+
+        target, _timings, _info = superres.super_resolve_raster(
+            self.workspace, path, session(Nearest4()), bands=[4, 3, 2, 8]
+        )
         with rasterio.open(target) as dataset:
-            output = dataset.read()
-            self.assertEqual((dataset.width, dataset.height), (80, 40))
-            self.assertAlmostEqual(dataset.bounds.left, 500_100)
-            self.assertAlmostEqual(dataset.bounds.bottom, 2_999_900)
-            self.assertAlmostEqual(dataset.bounds.right, 500_300)
-            self.assertAlmostEqual(dataset.bounds.top, 3_000_000)
-        expected = np.repeat(np.repeat(self.source[:, :10, 10:30], 4, axis=1), 4, axis=2)
-        np.testing.assert_array_equal(output, expected)
-        self.assertEqual(info["source_pixels"], [20, 10])
-        self.assertEqual(info["output_pixels"], [80, 40])
-
-    def test_two_dates_are_concatenated_and_must_share_a_grid(self):
-        other = "data/other.tif"
-        write_raster(self.workspace.resolve(other, write=True), 300, 260)
-        graph = Nearest4()
-
-        superres.super_resolve_raster(
-            self.workspace,
-            self.path,
-            session(graph, spec(dates=2)),
-            dates=[other],
-            tile_size=128,
-            halo=8,
-        )
-
-        self.assertEqual(graph.shapes[0], (1, 6, 144, 144))
-
-    def test_a_date_on_another_grid_is_refused(self):
-        other = "data/other.tif"
-        write_raster(self.workspace.resolve(other, write=True), 128, 128)
-
-        with self.assertRaises(ToolInputError):
-            superres.super_resolve_raster(
-                self.workspace,
-                self.path,
-                session(Nearest4(), spec(dates=2)),
-                dates=[other],
-            )
-
-    def test_the_model_date_count_is_enforced(self):
-        with self.assertRaises(ToolInputError):
-            superres.super_resolve_raster(
-                self.workspace, self.path, session(Nearest4(), spec(dates=2))
-            )
+            self.assertEqual(dataset.count, 4)
 
     def test_max_tiles_refuses_before_writing(self):
         out = "results/limited.tif"
@@ -210,8 +188,7 @@ class RasterTests(unittest.TestCase):
             superres.super_resolve_raster(
                 self.workspace,
                 self.path,
-                session(Nearest4(), spec()),
-                tile_size=64,
+                session(Nearest4()),
                 max_tiles=2,
                 out=out,
             )

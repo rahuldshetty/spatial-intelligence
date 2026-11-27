@@ -180,12 +180,10 @@ def _local_rel_for_layer(layer: dict, workspace: Workspace) -> str | None:
                 return rel
         return None
     if "/api/files/" in raw:
-        rel = unquote(urlparse(raw).path.split("/api/files/", 1)[1])
-        try:
-            candidate = workspace.resolve(rel, must_exist=True)
-        except WorkspaceError:
-            return None
-        return rel if candidate.is_file() else None
+        # Return the path even when the file is gone: the reload pass uses it to
+        # prune a layer whose source was deleted (instead of letting the browser
+        # request a missing range).
+        return unquote(urlparse(raw).path.split("/api/files/", 1)[1])
     return None
 
 
@@ -200,21 +198,60 @@ def repoint_local_rasters(
     without the geolibre static server's per-session token. This migrates layers
     saved with the old ``_geolibre_local/...`` session URL back to the stable URL
     (recovering the workspace path from ``metadata.geoaiSourcePath`` or, when
-    that tag is missing, by filename). Returns the number of layers re-pointed.
+    that tag is missing, by filename). A local layer whose file no longer exists
+    is dropped, so a deleted temporary raster cannot produce a failing layer and
+    a 416 range request on every restore. Returns the number of layers re-pointed.
     """
     count = 0
+    stale: list[dict] = []
     for layer in layers(map_obj):
         rel = _local_rel_for_layer(layer, workspace)
         if not rel:
             continue
+        try:
+            present = workspace.resolve(rel, must_exist=True).is_file()
+        except WorkspaceError:
+            present = False
+        if not present:
+            stale.append(layer)
+            continue
+        metadata = layer.setdefault("metadata", {})
+        state = metadata.get("rasterState") or {}
+        bands = state.get("bands") or []
+        if metadata.get("customLayerType") == "raster" and len(bands) == 3:
+            try:
+                copy = raster.rgb_display_copy(workspace, rel, bands)
+            except Exception:  # noqa: BLE001 - an unreadable layer is pruned by the browser
+                copy = None
+            if copy is not None:
+                rel = workspace.relative(copy)
+                state["bands"] = [1, 2, 3]
+                state["mode"] = "rgb"
+                if isinstance(metadata.get("rasterState"), dict):
+                    metadata["rasterState"] = state
+                metadata["bandCount"] = 3
+                try:
+                    info = raster.raster_info(workspace, rel)
+                    from rasterio.warp import transform_bounds
+
+                    metadata["bounds"] = [
+                        round(float(value), 6)
+                        for value in transform_bounds(
+                            info["crs"], "EPSG:4326", *info["bounds"], densify_pts=21
+                        )
+                    ]
+                except Exception:  # noqa: BLE001 - metadata is best effort
+                    pass
         url = file_url(rel)
         source = layer.get("source")
         if isinstance(source, dict):
             source["url"] = url
         layer["sourcePath"] = url
-        layer.setdefault("metadata", {})[LOCAL_SOURCE_KEY] = rel
-        layer["metadata"].pop("error", None)
+        metadata[LOCAL_SOURCE_KEY] = rel
+        metadata.pop("error", None)
         count += 1
+    for layer in stale:
+        map_obj.project["layers"].remove(layer)
     return count
 
 
@@ -379,8 +416,43 @@ def add_raster(
     if rel is not None and file_url is not None:
         _tag_local_source(map_obj, layer_id, rel)
     _complete_raster_state(map_obj, layer_id, bands, colormap, rescale_arg)
+    _fill_raster_metadata(map_obj, layer_id, workspace, rel, path)
     persist_map(map_obj, workspace)
     return layer_id
+
+
+def _fill_raster_metadata(
+    map_obj: Map,
+    layer_id: str,
+    workspace: Workspace,
+    rel: str | None,
+    path: str,
+) -> None:
+    """Record WGS84 bounds and band count from the file the layer points at.
+
+    GeoLibre's browser reader enriches a layer after it loads; if that reader
+    rejects the file the layer keeps null bounds and the control cannot place or
+    fit it. Filling the values here makes the persisted project useful even
+    before the browser has read the raster.
+    """
+    from rasterio.warp import transform_bounds
+
+    layer = find_layer(map_obj, layer_id)
+    if layer is None:
+        return
+    source = rel if rel is not None else path
+    try:
+        info = raster.raster_info(workspace, source)
+        bounds = list(
+            transform_bounds(info["crs"], "EPSG:4326", *info["bounds"], densify_pts=21)
+        )
+    except Exception:  # noqa: BLE001 - an unreadable file is the caller's concern
+        return
+    metadata = layer.setdefault("metadata", {})
+    if not metadata.get("bounds"):
+        metadata["bounds"] = [round(float(value), 6) for value in bounds]
+    if not metadata.get("bandCount"):
+        metadata["bandCount"] = int(info["count"])
 
 
 def _complete_raster_state(

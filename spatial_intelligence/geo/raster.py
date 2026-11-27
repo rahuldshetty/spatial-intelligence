@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import rasterio
@@ -236,6 +236,61 @@ def to_cog_if_needed(
     target = workspace.results / f"{source.stem}_cog{suffix}"
     written = to_cog(workspace, workspace.relative(source), workspace.relative(target), job=job)
     return written, True
+
+
+def rgb_display_copy(
+    workspace: Workspace,
+    path: str,
+    bands: Sequence[int],
+    *,
+    job: Job | None = None,
+) -> Path | None:
+    """Write a three-band RGB copy of a raster, or return ``None``.
+
+    GeoLibre's in-browser GeoTIFF reader renders three-band RGB reliably but
+    rejects four-band uint16 COGs (the 10 m/SR products carry NIR as band 4).
+    A map layer only needs the requested three bands, so the copy is a display
+    artifact; the source keeps all bands for analysis.
+    """
+    from rasterio.enums import ColorInterp, Resampling
+
+    source = workspace.resolve(path, must_exist=True)
+    selected = list(bands)
+    if len(selected) != 3 or any(index < 1 for index in selected):
+        return None
+    with rasterio.open(source) as dataset:
+        if dataset.count <= 3 or max(selected) > dataset.count:
+            return None
+        array = dataset.read(selected)
+        target = workspace.results / f"{source.stem}_rgb.tif"
+        profile = {
+            "driver": "GTiff",
+            "width": dataset.width,
+            "height": dataset.height,
+            "count": 3,
+            "dtype": array.dtype.name,
+            "crs": dataset.crs,
+            "transform": dataset.transform,
+            "nodata": dataset.nodata,
+            "tiled": True,
+            "blockxsize": 256,
+            "blockysize": 256,
+            "compress": "deflate",
+            "interleave": "pixel",
+        }
+        with rasterio.open(target, "w", **profile) as output:
+            output.write(array)
+            output.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue]
+            levels = [
+                level
+                for level in (2, 4, 8, 16)
+                if max(dataset.width, dataset.height) // level >= 1
+            ]
+            if levels:
+                output.build_overviews(levels, Resampling.average)
+                output.update_tags(ns="rio_overview", resampling="average")
+    _advance(job, f"{source.stem} RGB")
+    return target
 
 
 def to_cog(

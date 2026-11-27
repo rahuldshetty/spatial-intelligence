@@ -200,18 +200,18 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         id="imagery.super-resolution",
-        title="Local 4x super-resolution (Satlas ESRGAN)",
+        title="Local Sentinel-2 4x super-resolution (OpenSR SEN2-SR)",
         summary=(
-            "Upscale Sentinel-2 or aerial RGB imagery 4x on this machine with "
-            "Satlas ESRGAN, optionally from 2-16 co-registered dates. Output is "
-            "2.5 m RGB for 10 m input; detail is generated, not measured."
+            "Upscale a Sentinel-2 B04/B03/B02/B08 raw-DN stack from 10 m to 2.5 m "
+            "with the official OpenSR SEN2-SR model, on this machine. It returns "
+            "four bands: RGB plus NIR, with generated fine detail."
         ),
         keywords=(
             "super", "resolution", "super-resolution", "superresolution", "upscale",
-            "upsample", "enhance", "sharpen", "detail", "4x", "esrgan", "satlas",
-            "2.5m", "pixel",
+            "enhance", "detail", "4x", "opensr", "sen2-sr", "sentinel-2", "2.5m",
+            "rgbn", "reflectance", "nir", "srgan",
         ),
-        implementation="backend (ONNX Runtime, models cached under .models)",
+        implementation="backend (PyTorch / OpenSR SRGAN, models cached under .models)",
         tools=("ai_models", "ai_pull_model", "ai_unload_model", "super_resolve"),
     ),
     Capability(

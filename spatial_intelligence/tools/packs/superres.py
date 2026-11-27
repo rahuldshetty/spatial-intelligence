@@ -1,4 +1,4 @@
-"""Super-resolution: upscale a raster 4x with a local Satlas ESRGAN model."""
+"""Super-resolution: upscale a Sentinel-2 10 m stack to 2.5 m with OpenSR SEN2-SR."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from .ai_common import task_job
 
 @pack(category="super-resolution")
 class SuperResolutionPack:
-    """4x upscaling of rasters, on this machine."""
+    """4x upscaling of Sentinel-2 rasters, on this machine."""
 
     def __init__(self, runtime: ToolRuntime) -> None:
         self._rt = runtime
@@ -30,38 +30,32 @@ class SuperResolutionPack:
     def super_resolve(
         self,
         path: str,
-        model_id: str = "satlas-esrgan-1s2",
-        dates: list[str] | None = None,
+        model_id: str = "sen2-sr",
         bands: list[int] | None = None,
         bounds: list[float] | None = None,
-        tile_size: int = superres.DEFAULT_TILE,
-        halo: int = superres.DEFAULT_HALO,
         max_tiles: int = superres.MAX_TILES,
         out: str = superres.DEFAULT_OUT,
     ) -> dict:
-        """Upscale a raster 4x with a local Satlas ESRGAN model.
+        """Upscale a Sentinel-2 four-band 10 m stack to 2.5 m with OpenSR SEN2-SR.
 
-        Trained on Sentinel-2 10 m imagery and run at 4x: output is 2.5 m RGB.
-        Detail is generated, not recovered, so use it for display and
-        interpretation, not measurement. The default model takes one RGB raster
-        (L1C TCI is the matched input); the -2s2/-4s2/-8s2/-16s2 models take 2,
-        4, 8, or 16 dates, and -10m/-20m/-60m take 8 dates with extra S2 bands.
+        The model is Sentinel-2 specific and takes **B04, B03, B02, B08** raw
+        reflectance DN at 10 m: uint16 values, not divided by 10000. It returns
+        the same four bands at 2.5 m, with measurement-consistency back-projection.
+        A three-band TCI/RGB raster, an 8-bit image, or a float stack is refused,
+        because that is not the model's input.
 
-        path is the first date and defines the grid. For a multi-date model pass
-        the remaining co-registered rasters in dates; a different CRS, size, or
-        transform is refused rather than resampled. bands selects the raster
-        bands in the model's per-date order, defaulting to 1..N: -10m is TCI RGB
-        then B08, -20m adds B05/B06/B07/B11/B12, -60m adds B01/B09/B10. 8-bit
-        input is divided by 255; 16-bit Sentinel-2 by 8160.
+        path is a four-band GeoTIFF in the correct order. If the raster has more
+        than four bands, pass bands=[...] selecting red, green, blue, and NIR in
+        that order (for a standard 12-band S2 stack that is usually [4, 3, 2, 8]).
+        bands must be 10 m; a 20 m or geographic input is refused instead of
+        silently producing the wrong pixel size. bounds=[west, south, east, north]
+        limits the work. max_tiles refuses a run before writing.
 
-        bounds=[west, south, east, north] limits the work to that box. tile_size
-        is the core in source pixels; halo is context that is cropped from the
-        output.
-        max_tiles refuses a run before writing; raise it or pass bounds for a
-        larger area. Writes a tiled GeoTIFF at 4x under results/ (default
-        results/superres.tif) and returns its path, CRS, bounds, output pixel
-        size, tile count, and per-stage seconds. Call add_raster afterwards to
-        show it, then fit_bounds.
+        Writes a four-band uint16 GeoTIFF at 4x under results/ (default
+        results/superres.tif). Bands 1-3 are RGB for the map; band 4 is NIR.
+        The added detail is generated, not measured. Returns the path, CRS,
+        bounds, pixel size, tile count, and per-stage seconds. Call add_raster
+        with bands=[1, 2, 3] afterwards, then fit_bounds.
         """
         spec = find_model(model_id)
         if spec.task != "super-resolution":
@@ -75,25 +69,22 @@ class SuperResolutionPack:
                 self._rt.workspace,
                 path,
                 session,
-                dates=dates or (),
                 bands=bands,
                 bounds=bounds,
-                tile_size=tile_size,
-                halo=halo,
                 max_tiles=max_tiles,
                 out=out,
                 job=job,
             )
             summary: dict[str, Any] = {
                 "model": spec.id,
-                "scale": spec.scale,
                 "device": session.provider,
                 "path": self._rt.record_artifact(target),
                 "timings": timings.as_dict(),
             }
             summary.update(info)
             summary["message"] = (
-                "detail is synthetic; call add_raster to show the result, then fit_bounds"
+                "output bands are B04/B03/B02/B08 at 2.5 m; "
+                "call add_raster with bands=[1, 2, 3] to show RGB; detail is generated"
             )
             job.done(artifact=self._rt.workspace.relative(target))
             return summary

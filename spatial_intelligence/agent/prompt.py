@@ -55,8 +55,11 @@ Rules:
    known objects — vehicles, boats, aircraft, people — call detect_objects
    instead (yolos-tiny, ~26 MB): COCO classes only, and it needs about a metre
    per pixel, so aerial and drone imagery rather than 10 m satellite pixels.
-   To upscale imagery 4x, call super_resolve (satlas-esrgan-1s2, ~67 MB); it
-   writes results/*.tif, the detail is synthetic, and add_raster shows it.
+   To upscale Sentinel-2 imagery 4x, call super_resolve (sen2-sr): it takes a
+   four-band B04/B03/B02/B08 raw-DN stack at 10 m, not TCI or an 8-bit RGB
+   composite. It writes results/*.tif with RGB in bands 1-3 and NIR in band 4;
+   add_raster with bands=[1, 2, 3] shows it. The added detail is generated, not
+   measured.
 6. A full satellite band COG is ~200 MB, so clip the scene's asset URL to the
    window you need and analyze that copy: clip, raster_info, raster_stats, and
    sample_point all accept remote COG URLs. Bounds are longitude/latitude

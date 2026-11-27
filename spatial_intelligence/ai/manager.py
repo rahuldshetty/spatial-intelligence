@@ -196,7 +196,9 @@ class ModelManager:
         return session
 
     def _load(self, spec: ModelSpec) -> ModelSession:
-        """Build the ONNX sessions for ``spec`` (the expensive call)."""
+        """Build the runtime for ``spec`` (the expensive call)."""
+        if spec.runtime == "opensr":
+            return self._load_opensr(spec)
         try:
             import onnxruntime as ort
         except ImportError as exc:  # noqa: BLE001 - one actionable message
@@ -215,10 +217,13 @@ class ModelManager:
             raise ToolInputError(
                 f"{spec.id} is missing {', '.join(missing)}; call ai_pull_model first"
             )
-        # The catalog is ordered encoder-first; the last entry is the decoder. A
-        # one-file model is a single graph, so both roles point at it.
-        encoder_file = spec.files[0]
-        decoder_file = spec.files[-1]
+        # The catalog may carry auxiliary files (a Fourier mask) beside the
+        # graph, so sessions are built from the ONNX entries only.
+        onnx_files = [file for file in spec.files if file.path.lower().endswith(".onnx")]
+        if not onnx_files:
+            raise ToolInputError(f"{spec.id} has no ONNX graph in the catalog")
+        encoder_file = onnx_files[0]
+        decoder_file = onnx_files[-1]
         encoder = ort.InferenceSession(
             str(store.file_path(spec, encoder_file)), sess_options=options, providers=providers
         )
@@ -236,6 +241,57 @@ class ModelManager:
             decoder=decoder,
             provider=encoder.get_providers()[0],
             threads=options.intra_op_num_threads,
+            loaded_at=now,
+            last_used=now,
+        )
+
+    def _load_opensr(self, spec: ModelSpec) -> ModelSession:
+        """Load an official OpenSR SRGAN checkpoint from the verified cache."""
+        try:
+            import torch
+            from opensr_srgan import load_from_config
+        except ImportError as exc:  # noqa: BLE001 - one actionable message
+            raise ToolInputError(
+                "opensr-srgan is missing from this install, so the SEN2-SR model "
+                "cannot run; reinstall spatial-intelligence (it ships the package)"
+            ) from exc
+
+        config_file = next(
+            (file for file in spec.files if file.path.endswith((".yaml", ".yml"))), None
+        )
+        checkpoint_file = next(
+            (file for file in spec.files if file.path.endswith(".ckpt")), None
+        )
+        if config_file is None or checkpoint_file is None:
+            raise ToolInputError(f"{spec.id} has no config/checkpoint in the catalog")
+        missing = [
+            file.path
+            for file in (config_file, checkpoint_file)
+            if not store.file_path(spec, file).is_file()
+        ]
+        if missing:
+            raise ToolInputError(
+                f"{spec.id} is missing {', '.join(missing)}; call ai_pull_model first"
+            )
+
+        torch.set_num_threads(env.onnx_threads())
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = load_from_config(
+            store.file_path(spec, config_file),
+            store.file_path(spec, checkpoint_file),
+            map_location="cpu",
+            mode="eval",
+            strict=True,
+        )
+        model.to(device)
+        model.eval()
+        now = time.monotonic()
+        return ModelSession(
+            spec=spec,
+            encoder=model,
+            decoder=None,
+            provider=str(device),
+            threads=torch.get_num_threads(),
             loaded_at=now,
             last_used=now,
         )

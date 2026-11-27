@@ -39,9 +39,12 @@ every output is a real file in the workspace you can inspect or reuse.
 
 **🤖 Local AI models**
 
-- Segmentation (SAM family), object detection (COCO), and 4x super-resolution
-  (Satlas ESRGAN) run locally on ONNX Runtime — no service to stand up. Models
-  download once into `.models/` and are unloaded when idle.
+- Segmentation (SAM family), object detection (COCO), and 4x Sentinel-2
+  super-resolution (OpenSR SEN2-SR) run locally — no service to stand up.
+  Models download once into `.models/` and are unloaded when idle.
+  Super-resolution takes the four 10 m B04/B03/B02/B08 raw-DN bands and returns
+  2.5 m RGB+NIR; a TCI or 8-bit RGB composite is refused. The OpenSR package
+  requires Python 3.12; on 3.11 the tool reports it as unavailable.
 - Heavy research libraries (torchgeo, terratorch, torch) can be exposed to the
   Python sandbox; the agent reads their API references on demand and writes its
   own inference code, so new models need no new tool.
@@ -144,7 +147,7 @@ The browser opens at `http://127.0.0.1:8000`.
 
 Notes: the first start downloads the pinned `marked` bundle for the UI (cached
 afterwards). Local AI models download on first use — about 40 MB for
-segmentation, 26 MB for detection, 67 MB per super-resolution variant.
+segmentation, 26 MB for detection, 68 MB for super-resolution.
 
 ## ⚙️ Configuration
 

@@ -80,7 +80,7 @@ class PackSplitTestCase(unittest.TestCase):
         )
         self.assertEqual(
             SuperResolutionPack.__dict__["super_resolve"].__defaults__[0],
-            "satlas-esrgan-1s2",
+            "sen2-sr",
         )
 
 

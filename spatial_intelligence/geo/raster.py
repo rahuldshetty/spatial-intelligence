@@ -511,9 +511,12 @@ def rescale(
             else:
                 vmin = vmin if vmin is not None else float(valid.min())
                 vmax = vmax if vmax is not None else float(valid.max())
-        scaled = np.clip((arr - vmin) / (vmax - vmin) * 255.0, 0, 255).astype("uint8")
+        scaled = np.clip((arr - vmin) / (vmax - vmin) * 255.0, 0, 255)
         if nodata is not None:
-            scaled = np.where(np.isnan(arr), 0, scaled)
+            # 0 is the output's nodata, which a renderer discards; keep it for
+            # masked pixels only or a valid dark pixel becomes a see-through hole.
+            scaled = np.where(np.isnan(arr), 0, np.maximum(scaled, 1))
+        scaled = scaled.astype("uint8")
         profile = src.profile.copy()
         profile.update(dtype="uint8", count=1, driver="COG", compress="deflate")
         if nodata is not None:
@@ -1117,7 +1120,11 @@ def compose_rgb(
     file with three bands. All three inputs must already share a grid and CRS
     (``reproject`` and ``clip`` them to one first). ``stretch`` scales each band
     between its ``pmin``/``pmax`` percentiles, which is what makes the result
-    look like imagery rather than a dark rectangle.
+    look like imagery rather than a dark rectangle. The output declares nodata=0
+    when any input has a nodata value, so 0 is reserved for source-nodata
+    pixels: a valid pixel the stretch clamps to 0 is written as 1, because a
+    renderer discards nodata pixels and the map would show the basemap through
+    the hole.
     """
     dst = _target(workspace, out)
     with _source(workspace, red, whole=True) as red_ds, _source(
@@ -1130,7 +1137,17 @@ def compose_rgb(
                     "reproject and clip them to one grid first"
                 )
         profile = red_ds.profile.copy()
-        profile.update(dtype="uint8", count=3, driver="COG", compress="deflate")
+        # Bands are written with 0 for masked pixels, so the output's nodata is
+        # 0 whenever an input declares one: an inherited value such as -9999
+        # cannot survive the uint8 cast and would be dropped silently.
+        has_nodata = any(ds.nodata is not None for ds in (red_ds, green_ds, blue_ds))
+        profile.update(
+            dtype="uint8",
+            count=3,
+            driver="COG",
+            compress="deflate",
+            nodata=0 if has_nodata else None,
+        )
         with rasterio.open(dst, "w", **profile) as dest:
             for index, source in enumerate((red_ds, green_ds, blue_ds), start=1):
                 band = source.read(1, masked=True).astype("float64")
@@ -1145,8 +1162,15 @@ def compose_rgb(
                 if high <= low:
                     high = low + 1.0
                 scaled = np.clip((np.ma.getdata(band) - low) / (high - low) * 255.0, 0, 255)
+                # 0 is the output's nodata (the source profile carries it) and a
+                # renderer discards nodata pixels, so a valid pixel the stretch
+                # clamps to 0 would become a see-through hole over the basemap.
+                # Reserve 0 for masked pixels; valid pixels start at 1.
                 dest.write(
-                    np.where(np.ma.getmaskarray(band), 0, scaled).astype("uint8"), index
+                    np.where(np.ma.getmaskarray(band), 0, np.maximum(scaled, 1)).astype(
+                        "uint8"
+                    ),
+                    index,
                 )
     return dst
 

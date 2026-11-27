@@ -11,12 +11,15 @@ import { setMapProject, reportBridge } from "../api.js";
 import { el } from "../dom.js";
 import { state } from "../store.js";
 
+// Commands the app answers over `geolibre:command` (GeoLibre 3.10 protocol).
+// Projects load over the separate `geolibre:load-project` message, not a command.
 const BRIDGE_METHODS = [
-  "project.load",
-  "project.request_state",
-  "toImage",
-  "getView",
+  "addGeoJsonLayer",
+  "fitBounds",
   "getDrawnFeatures",
+  "getView",
+  "removeLayer",
+  "toImage",
 ];
 
 let panel = null;

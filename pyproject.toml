@@ -36,7 +36,7 @@ dependencies = [
   "fastapi",
   "uvicorn",
   "python-multipart",
-  "geolibre==2.9.0",
+  "geolibre==3.10.1",
   # Local AI models (segment_image, detect_objects). A main dependency, not an
   # extra: it is 14 MB, ships wheels everywhere, and backs tools the UI presents
   # as built in — an install that cannot segment is a broken install.

@@ -483,6 +483,30 @@ class MapLayerServiceTests(MapTestCase):
         self.assertNotIn("fillColour", layerops.find_layer(self.map, layer_id)["style"])
         self.assertNotIn(layer_id, self.map.project.get("styles", {}))
 
+    def test_style_layer_accepts_keys_added_after_2_9(self):
+        """The vocabulary follows the installed app, not a frozen 2.9 copy."""
+        self.geojson_file("data/points.geojson")
+        layer_id = layerops.add_geojson(
+            self.workspace, self.map, "data/points.geojson", "Points"
+        )
+
+        result = layerops.style_layer(
+            self.workspace,
+            self.map,
+            layer_id,
+            {
+                "strokeOpacity": 0.5,
+                "labels": {
+                    "enabled": True,
+                    "field": "name",
+                    "numberFormatEnabled": True,
+                },
+            },
+        )
+
+        self.assertEqual(result["style"]["strokeOpacity"], 0.5)
+        self.assertTrue(result["style"]["labels"]["numberFormatEnabled"])
+
     def test_style_layer_rejects_an_unknown_label_key(self):
         self.geojson_file("data/points.geojson")
         layer_id = layerops.add_geojson(

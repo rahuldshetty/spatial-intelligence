@@ -35,7 +35,7 @@ class WorkspaceSession:
             center=EMPTY_VIEW["center"],
             zoom=EMPTY_VIEW["zoom"],
             height="100%",
-            layout="embed",
+            app_layout="embed",
             theme="light",
         )
 

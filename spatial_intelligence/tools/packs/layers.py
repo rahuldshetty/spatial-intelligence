@@ -158,7 +158,7 @@ class LayersPack:
     def describe_geolibre_bridge(self) -> dict:
         """Return the connected GeoLibre version and callable embed methods.
 
-        Plugin methods are not advertised by GeoLibre 2.9's embed protocol yet;
+        Plugin methods are not advertised by GeoLibre's embed protocol yet;
         use capability discovery for an explicit interactive handoff instead of
         assuming that a plugin can be called programmatically.
         """

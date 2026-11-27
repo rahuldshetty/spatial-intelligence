@@ -1323,11 +1323,12 @@ await scenario("map", async () => {
     JSON.stringify({
       version: "1.2",
       methods: [
-        "project.load",
-        "project.request_state",
-        "toImage",
-        "getView",
+        "addGeoJsonLayer",
+        "fitBounds",
         "getDrawnFeatures",
+        "getView",
+        "removeLayer",
+        "toImage",
       ],
     })
   );

@@ -431,31 +431,41 @@ class LayersPack:
     @tool()
     def swipe_compare(
         self,
-        left: str | list[str],
-        right: str | list[str],
+        left: str | list[str] | None = None,
+        right: str | list[str] | None = None,
         orientation: str = "vertical",
         position: float = 50,
         control_position: str = "top-right",
+        enabled: bool = True,
     ) -> dict:
-        """Configure GeoLibre's swipe control to compare two sets of layers.
+        """Configure or remove GeoLibre's swipe control comparing two layer sets.
 
         ``left``/``right`` are a layer id or display name, or a list of them; a
         single name is the usual call. ``__basemap__``
         stands for the background map, which is how imagery is compared against
         the basemap. ``orientation`` is ``vertical`` or ``horizontal`` and
         ``position`` is the initial slider percentage (0-100). Both sides stay in
-        the project as ordinary layers, so the comparison can be unset by
-        removing or restyling the layers.
+        the project as ordinary layers.
+
+        Set ``enabled=False`` to remove the comparison control; ``left`` and
+        ``right`` are then not needed. The layers themselves are untouched.
         """
-        result = layerops.swipe_compare(
-            self._rt.workspace,
-            self._map,
-            left,
-            right,
-            orientation,
-            position,
-            control_position,
-        )
+        if enabled:
+            if left is None or right is None:
+                raise ToolInputError(
+                    "swipe_compare needs left and right layers, or enabled=False"
+                )
+            result = layerops.swipe_compare(
+                self._rt.workspace,
+                self._map,
+                left,
+                right,
+                orientation,
+                position,
+                control_position,
+            )
+        else:
+            result = layerops.clear_swipe(self._rt.workspace, self._map)
         self._mutated()
         return result
 

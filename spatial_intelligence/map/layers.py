@@ -20,6 +20,7 @@ from urllib.parse import unquote, urlparse
 
 from geolibre import Map
 from geolibre import authoring as geolibre_authoring
+from geolibre import project as geolibre_project
 
 from ..contracts.errors import ToolInputError
 from ..workspace import Workspace, WorkspaceError
@@ -44,6 +45,7 @@ __all__ = [
     "classify_layer",
     "clean_layer_name",
     "clear_layers",
+    "clear_swipe",
     "describe",
     "export_html",
     "find_layer",
@@ -636,6 +638,27 @@ def swipe_compare(
         raise ToolInputError(str(exc)) from exc
     persist_map(map_obj, workspace)
     return {"status": "applied", "swipe": state}
+
+
+@locked
+def clear_swipe(workspace: Workspace, map_obj: Map) -> dict:
+    """Remove the split-map control and its saved state.
+
+    The two sides are layers like any other, so they stay in the project; only
+    the control is deactivated and forgotten. Removing the plugin id from
+    ``activePluginIds`` is what makes GeoLibre unmount it on restore, and
+    dropping the settings blob keeps a later project load from bringing it back.
+    """
+    plugins = geolibre_project.ensure_plugins_block(map_obj.project)
+    plugins["activePluginIds"] = [
+        plugin_id
+        for plugin_id in plugins["activePluginIds"]
+        if plugin_id != geolibre_project.SWIPE_PLUGIN_ID
+    ]
+    plugins["settings"].pop(geolibre_project.SWIPE_PLUGIN_ID, None)
+    plugins["mapControlPositions"].pop(geolibre_project.SWIPE_PLUGIN_ID, None)
+    persist_map(map_obj, workspace)
+    return {"status": "cleared", "swipe": None}
 
 
 @locked

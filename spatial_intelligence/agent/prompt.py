@@ -68,8 +68,8 @@ Rules:
    measures meters by default; simplify, points_along, and grid use layer units.
    After a dissolve/overlay/buffer failure, run check_geometry then fix_geometry.
    add_heatmap renders points as a density surface; swipe_compare compares two
-   layers (or a layer against "__basemap__"); style_layer restyles a layer and
-   list_style_keys names the accepted keys.
+   layers (or a layer against "__basemap__"; enabled=False removes the control);
+   style_layer restyles a layer and list_style_keys names the accepted keys.
 8. Sentinel-1 GRD (.SAFE): imagery is <safe>/measurement/*-vv.tiff and
    *-vh.tiff; the annotation/*.xml is huge, so read a slice with read_file.
 9. Download external file assets into data/ before mapping or analyzing them;

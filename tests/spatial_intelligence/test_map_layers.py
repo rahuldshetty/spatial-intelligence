@@ -849,6 +849,37 @@ class LayersPackTests(MapTestCase):
         swipe = self.map.project["plugins"]["settings"]["maplibre-gl-swipe"]
         self.assertEqual(swipe["rightLayers"], ["__basemap__"])
 
+    def test_swipe_compare_can_be_cleared(self):
+        map_notifications: list[str] = []
+        registry = self.build_pack([], map_notifications)
+        self.geojson_file("data/points.geojson")
+        registry.get("add_geojson").callable("data/points.geojson", "Before")
+        registry.get("add_geojson").callable("data/points.geojson", "After")
+        registry.get("swipe_compare").callable(["Before"], ["After"])
+
+        result = registry.get("swipe_compare").callable(enabled=False)
+
+        plugins = self.map.project["plugins"]
+        self.assertEqual(result, {"status": "cleared", "swipe": None})
+        self.assertNotIn("maplibre-gl-swipe", plugins["settings"])
+        self.assertNotIn("maplibre-gl-swipe", plugins["activePluginIds"])
+        self.assertNotIn("maplibre-gl-swipe", plugins["mapControlPositions"])
+        self.assertEqual(
+            self.reload_map().describe()["layerCount"], 2
+        )  # the layers are untouched
+        self.assertEqual(map_notifications, ["map", "map", "map", "map"])
+        # Clearing again is harmless.
+        self.assertEqual(
+            registry.get("swipe_compare").callable(enabled=False)["status"], "cleared"
+        )
+
+    def test_swipe_compare_requires_both_sides_when_enabled(self):
+        registry = self.build_pack([], [])
+
+        with self.assertRaises(ToolInputError) as caught:
+            registry.get("swipe_compare").callable(enabled=True)
+        self.assertIn("enabled=False", str(caught.exception))
+
     def test_swipe_compare_rejects_an_unknown_layer_and_an_empty_side(self):
         registry = self.build_pack([], [])
 

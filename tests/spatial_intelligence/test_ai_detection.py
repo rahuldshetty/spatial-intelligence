@@ -359,10 +359,10 @@ class CatalogTestCase(unittest.TestCase):
         self.assertGreater(spec.shortest_edge, 0)
         self.assertGreater(spec.longest_edge, spec.shortest_edge)
 
-    def test_the_two_catalog_entries_serve_different_tasks(self):
+    def test_the_catalog_entries_serve_different_tasks(self):
         tasks = {spec.task for spec in catalog.MODELS}
 
-        self.assertEqual(tasks, {"segmentation", "detection"})
+        self.assertEqual(tasks, {"segmentation", "detection", "super-resolution"})
         self.assertEqual([spec.id for spec in catalog.iter_specs("detection")], ["yolos-tiny"])
 
 

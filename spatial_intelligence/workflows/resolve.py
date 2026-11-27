@@ -194,7 +194,11 @@ def option_label(field: InteractionField, value: str) -> str:
 
 
 #: The analysis tool that runs a shipped model, by task.
-TASK_TOOLS = {"segmentation": "segment_image", "detection": "detect_objects"}
+TASK_TOOLS = {
+    "segmentation": "segment_image",
+    "detection": "detect_objects",
+    "super-resolution": "super_resolve",
+}
 
 #: How a checkpoint gets loaded, per route. The workflow's prompt says what the
 #: analysis is; this line says how this particular model runs, because only the
@@ -202,6 +206,7 @@ TASK_TOOLS = {"segmentation": "segment_image", "detection": "detect_objects"}
 #: weights the agent has to wire up itself.
 ROUTE_RUNNERS = {
     "onnx": 'run {tool}(model_id="{ref}").',
+    "opensr": 'run {tool}(model_id="{ref}").',
     "torchgeo": "fetch it with ai_fetch_model, then load it in run_python with "
     "torchgeo (skill(\"torchgeo\")) and write the inference code.",
     "terratorch": "fetch it with ai_fetch_model, then load it in run_python with "

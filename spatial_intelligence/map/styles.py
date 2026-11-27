@@ -14,12 +14,14 @@ renders, and the app's next echo writes the old resolved value back over
 ``layer.style``. :func:`store` writes both copies so a change cannot be
 shadowed.
 
-``STYLE_KEYS``/``LABEL_KEYS``/``DEFAULT_LABELS`` mirror ``DEFAULT_LAYER_STYLE``
-in GeoLibre 2.9's ``@geolibre/core`` app bundle (the authoritative schema; the
-Python mirror in ``geolibre.project`` omits several keys the app knows). They
-exist so an unknown key is a loud failure instead of the silent no-op it is for
-the app: the earlier behaviour accepted ``textField``/``textSize``, reported
-``applied``, and drew nothing.
+``STYLE_KEYS``/``LABEL_KEYS``/``DEFAULT_LABELS`` are derived from
+``geolibre.project``'s ``DEFAULT_LAYER_STYLE``/``DEFAULT_LABEL_STYLE``, the
+schema the bundled app is built against (GeoLibre 3.10.1). Deriving them rather
+than copying them keeps the vocabulary in step with the installed app: a hand
+copy silently went stale as upstream added keys. They exist so an unknown key
+is a loud failure instead of the silent no-op it is for the app: the earlier
+behaviour accepted ``textField``/``textSize``, reported ``applied``, and drew
+nothing.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from difflib import get_close_matches
 from typing import Any, Iterable
 
 from geolibre import authoring as geolibre_authoring
-from geolibre.project import DEFAULT_LAYER_STYLE
+from geolibre.project import DEFAULT_LABEL_STYLE, DEFAULT_LAYER_STYLE
 
 from ..contracts.errors import ToolInputError
 
@@ -46,153 +48,16 @@ __all__ = [
     "summary",
 ]
 
-#: Style keys GeoLibre 2.9 accepts at the top level of a layer style.
-STYLE_KEYS: frozenset[str] = frozenset(
-    {
-        "minZoom",
-        "maxZoom",
-        "fillColor",
-        "strokeColor",
-        "strokeWidth",
-        "strokeWidthUnit",
-        "fillOpacity",
-        "circleRadius",
-        "textColor",
-        "textHaloColor",
-        "textHaloWidth",
-        "textSize",
-        "labels",
-        "extrusionEnabled",
-        "extrusionColor",
-        "extrusionOpacity",
-        "extrusionHeightProperty",
-        "extrusionHeightScale",
-        "extrusionBase",
-        "extrusionAdvancedStyleEnabled",
-        "extrusionColorExpression",
-        "extrusionHeightExpression",
-        "elevation3dEnabled",
-        "elevation3dVerticalScale",
-        "elevation3dOffset",
-        "vectorStyleMode",
-        "vectorStyleProperty",
-        "vectorStyleClassCount",
-        "vectorStyleColorRamp",
-        "vectorStyleClassificationScheme",
-        "vectorStyleStops",
-        "vectorStyleExpression",
-        "vectorRules",
-        "proportionalSizeEnabled",
-        "proportionalSizeProperty",
-        "proportionalSizeMinValue",
-        "proportionalSizeMaxValue",
-        "proportionalSizeMinRadius",
-        "proportionalSizeMaxRadius",
-        "fillPattern",
-        "fillPatternColor",
-        "fillPatternSvg",
-        "markerEnabled",
-        "markerShape",
-        "markerColor",
-        "markerSize",
-        "markerSvg",
-        "simpleStyleEnabled",
-        "diagramType",
-        "diagramFields",
-        "diagramSizeMode",
-        "diagramSize",
-        "diagramSizeProperty",
-        "diagramMinZoom",
-        "diagramDeclutter",
-        "pointRenderer",
-        "heatmapRadius",
-        "heatmapIntensity",
-        "clusterRadius",
-        "clusterMaxZoom",
-        "invertedFillEnabled",
-        "lineDecoration",
-        "lineDecorationColor",
-        "lineDecorationSize",
-        "lineDecorationSpacing",
-        "geometryGenerator",
-        "geometryGeneratorBufferDistance",
-        "geometryGeneratorBufferProperty",
-        "geometryGeneratorFillColor",
-        "geometryGeneratorStrokeColor",
-        "geometryGeneratorStrokeWidth",
-        "geometryGeneratorOpacity",
-        "geometryGeneratorCircleRadius",
-        "geometryGeneratorSizeProperty",
-        "geometryGeneratorSizeMinValue",
-        "geometryGeneratorSizeMaxValue",
-        "geometryGeneratorSizeMinRadius",
-        "geometryGeneratorSizeMaxRadius",
-        "rasterBrightnessMin",
-        "rasterBrightnessMax",
-        "rasterSaturation",
-        "rasterContrast",
-        "rasterHueRotate",
-        "blendMode",
-    }
-)
+#: Style keys GeoLibre accepts at the top level of a layer style.
+STYLE_KEYS: frozenset[str] = frozenset(DEFAULT_LAYER_STYLE)
 
 #: Keys of the nested ``labels`` object (text drawn on a layer's features).
-LABEL_KEYS: frozenset[str] = frozenset(
-    {
-        "enabled",
-        "field",
-        "expression",
-        "placement",
-        "size",
-        "color",
-        "haloColor",
-        "haloWidth",
-        "minZoom",
-        "maxZoom",
-        "allowOverlap",
-        "anchor",
-        "offsetX",
-        "offsetY",
-        "rotation",
-        "maxWidth",
-        "transform",
-        "dedupe",
-        "sizeExpression",
-        "colorExpression",
-        "opacityExpression",
-        "visibilityExpression",
-        "priorityExpression",
-    }
-)
+LABEL_KEYS: frozenset[str] = frozenset(DEFAULT_LABEL_STYLE)
 
 #: The app's default ``labels`` object, used to complete a partial one. The app
 #: replaces ``labels`` wholesale (its merge is shallow), so a request that sets
 #: only ``field`` must still carry the rest of the object.
-DEFAULT_LABELS: dict[str, Any] = {
-    "enabled": False,
-    "field": "",
-    "expression": "",
-    "placement": "point",
-    "size": 13,
-    "color": "#111827",
-    "haloColor": "#ffffff",
-    "haloWidth": 1.5,
-    "minZoom": 0,
-    "maxZoom": 24,
-    "allowOverlap": False,
-    "anchor": "center",
-    "offsetX": 0,
-    "offsetY": 0,
-    "rotation": 0,
-    "maxWidth": 10,
-    "transform": "none",
-    "dedupe": "off",
-    "sizeExpression": "",
-    "colorExpression": "",
-    "opacityExpression": "",
-    "visibilityExpression": "",
-    "priorityExpression": "",
-}
+DEFAULT_LABELS: dict[str, Any] = dict(DEFAULT_LABEL_STYLE)
 
 #: Tolerated foreign names: MapLibre-style text keys and Leaflet-style path
 #: keys, translated onto GeoLibre's own vocabulary.

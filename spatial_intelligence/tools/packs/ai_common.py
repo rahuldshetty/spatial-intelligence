@@ -1,10 +1,13 @@
 """What a model-backed task tool does besides run its model.
 
-Segmentation and detection differ in their pipelines and their arguments, but
-both have to open a progress job, hold the model resident for the whole run,
-write the result layer into the workspace, and report the same handful of
-numbers back. That shared part lives here, once, so neither task pack owns a
-copy of it and a fix to the artifact handling lands for both.
+Segmentation and detection differ in their pipelines and arguments, but both
+have to open a progress job, hold the model resident for the whole run, write
+the result layer into the workspace, and report the same handful of numbers
+back. That shared part lives here, once, so neither task pack owns a copy of it
+and a fix to the artifact handling lands for both.
+
+Super-resolution uses the same job and reservation; it writes a raster in its
+own pipeline rather than a GeoJSON layer.
 """
 
 from __future__ import annotations

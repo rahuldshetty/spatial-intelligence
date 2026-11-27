@@ -1,4 +1,4 @@
-"""The AI packs: three packs over three problems, and the shared publish step."""
+"""The AI packs: one pack per problem, and the shared publish step."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from spatial_intelligence.tools.build import default_registry
 from spatial_intelligence.tools.packs.ai_common import publish, task_job
 from spatial_intelligence.tools.packs.detection import DetectionPack
 from spatial_intelligence.tools.packs.segmentation import SegmentationPack
+from spatial_intelligence.tools.packs.superres import SuperResolutionPack
 from spatial_intelligence.tools.runtime import RuntimeEvents, ToolRuntime
 from spatial_intelligence.workspace import Workspace
 
@@ -36,7 +37,7 @@ class PackSplitTestCase(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_the_three_packs_hold_their_own_tools(self):
+    def test_each_task_pack_holds_its_own_tools(self):
         lifecycle = {spec.name for spec in default_registry(self.runtime).specs()}
         registry = default_registry(self.runtime)
 
@@ -50,12 +51,18 @@ class PackSplitTestCase(unittest.TestCase):
         self.assertEqual(
             [spec.name for spec in registry.by_category("detection")], ["detect_objects"]
         )
-        self.assertTrue({"ai_models", "segment_image", "detect_objects"} <= lifecycle)
+        self.assertEqual(
+            [spec.name for spec in registry.by_category("super-resolution")],
+            ["super_resolve"],
+        )
+        self.assertTrue(
+            {"ai_models", "segment_image", "detect_objects", "super_resolve"} <= lifecycle
+        )
 
     def test_each_task_pack_declares_its_own_effects_and_kind(self):
         registry = default_registry(self.runtime)
 
-        for name in ("segment_image", "detect_objects"):
+        for name in ("segment_image", "detect_objects", "super_resolve"):
             spec = registry.get(name)
             self.assertEqual(spec.kind.value, "reporting")
             self.assertEqual(spec.timeout, 1800)
@@ -70,6 +77,10 @@ class PackSplitTestCase(unittest.TestCase):
         )
         self.assertEqual(
             DetectionPack.__dict__["detect_objects"].__defaults__[0], "yolos-tiny"
+        )
+        self.assertEqual(
+            SuperResolutionPack.__dict__["super_resolve"].__defaults__[0],
+            "sen2-sr",
         )
 
 

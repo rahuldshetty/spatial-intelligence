@@ -49,6 +49,12 @@ class ModelSpec:
     the reference preprocessing for the DETR family. ``labels`` are the class
     names in model order, so a detection result can be named without carrying a
     second table beside the catalog.
+
+    A super-resolution model carries ``scale``, the per-date ``input_bands`` in
+    model order, ``input_kind`` (``reflectance`` for raw Sentinel-2 bands),
+    ``output_bands``, and ``runtime`` (``onnx``, or ``opensr`` for the official
+    OpenSR SRGAN package). Its graph is unloaded as soon as the last reservation
+    ends when ``unload_when_idle`` is set.
     """
 
     id: str
@@ -64,6 +70,13 @@ class ModelSpec:
     labels: tuple[str, ...] = ()
     shortest_edge: int = 0
     longest_edge: int = 0
+    scale: int = 1
+    dates: int = 1
+    input_bands: tuple[str, ...] = ()
+    input_kind: str = "tci"
+    output_bands: int = 3
+    runtime: str = "onnx"
+    unload_when_idle: bool = False
 
     @property
     def total_bytes(self) -> int:
@@ -144,8 +157,46 @@ YOLOS_TINY = ModelSpec(
     ),
 )
 
+#: OpenSR SEN2-SR: the official Sentinel-2 RGB/NIR ESRGAN from
+#: https://srgan.opensr.eu. It takes raw reflectance DN in B04/B03/B02/B08 order
+#: and returns the same four bands at 4x with measurement-consistency
+#: back-projection. The checkpoint and config are downloaded from the official
+#: Hub repository; nothing is re-hosted. MIT, texture-oriented: the added detail
+#: is generated, not measured.
+SEN2_SR = ModelSpec(
+    id="sen2-sr",
+    repo="simon-donike/SR-GAN",
+    revision="b31d2728952cfaa022bd1df92d82a54c23cf4f8f",
+    files=(
+        ModelFile(
+            path="models/sen2-sr/v1/config.yaml",
+            sha256="",
+            size=767,
+        ),
+        ModelFile(
+            path="models/sen2-sr/v1/weights/inference.ckpt",
+            sha256="0d983a7eb8a7249dbb9d92885947f9e7679e003e757462648951f3144fb53a23",
+            size=67_903_179,
+        ),
+    ),
+    task="super-resolution",
+    prompts=(),
+    scale=4,
+    dates=1,
+    input_bands=("b04", "b03", "b02", "b08"),
+    input_kind="reflectance",
+    output_bands=4,
+    runtime="opensr",
+    unload_when_idle=True,
+    license="mit",
+    notes=(
+        "OpenSR SEN2-SR: 10 m B04/B03/B02/B08 raw DN to 2.5 m, 4 bands. "
+        "MIT, 68 MB, ESRGAN with back-projection. Texture-oriented."
+    ),
+)
+
 #: Everything this build can run, best default first.
-MODELS: tuple[ModelSpec, ...] = (SLIMSAM, YOLOS_TINY)
+MODELS: tuple[ModelSpec, ...] = (SLIMSAM, YOLOS_TINY, SEN2_SR)
 
 
 def find(model_id: str) -> ModelSpec:

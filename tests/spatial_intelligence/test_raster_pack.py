@@ -220,8 +220,11 @@ class RasterWriterTests(RasterTestCase):
         written = raster.rescale(self.workspace, SRC, "results/masked.tif", nodata=0.0)
 
         with rasterio.open(written) as ds:
+            data = ds.read(1)
             self.assertEqual(ds.nodata, 0.0)
-            self.assertEqual(int(ds.read(1)[2, 3]), 0)
+            self.assertEqual(int(data[2, 3]), 0)
+            # The darkest valid pixel is written as 1, not the nodata value.
+            self.assertEqual(int(data[0, 0]), 1)
 
     def test_band_math_evaluates_the_expression(self):
         values = np.arange(24, dtype="float32").reshape(2, 3, 4)
@@ -892,8 +895,28 @@ class RasterAnalysisTests(RasterTestCase):
 
         self.assertEqual(data.shape[0], 3)
         self.assertEqual(ds.dtypes[0], "uint8")
-        self.assertEqual(int(data.min()), 0)
+        # 0 is the output's nodata, so the darkest valid pixel must be 1: a
+        # renderer discards nodata pixels and would show the basemap through it.
+        self.assertEqual(int(data.min()), 1)
         self.assertEqual(int(data.max()), 255)
+
+    def test_compose_rgb_reserves_zero_for_source_nodata(self):
+        grid = np.tile(np.arange(4, dtype="float32") * 10.0, (4, 1))
+        grid[0, 0] = -9999.0
+        for name in ("red", "green", "blue"):
+            self.write_grid(f"data/{name}.tif", grid, nodata=-9999.0)
+
+        written = raster.compose_rgb(
+            self.workspace, "data/red.tif", "data/green.tif", "data/blue.tif", "results/rgb.tif"
+        )
+        with rasterio.open(written) as ds:
+            data = ds.read()
+            self.assertEqual(ds.nodata, 0.0)
+
+        for band in data:
+            self.assertEqual(int(band[0, 0]), 0)
+            self.assertEqual(int((band == 0).sum()), 1)
+            self.assertGreaterEqual(int(band[0, 1]), 1)
 
     def test_compose_rgb_refuses_bands_on_different_grids(self):
         grid = np.tile(np.arange(4, dtype="float32"), (4, 1))

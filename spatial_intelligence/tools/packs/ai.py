@@ -3,9 +3,10 @@
 These tools are about the models themselves — the catalog, the download, the
 memory they hold. The tasks that *use* a model live in their own packs
 (:mod:`~spatial_intelligence.tools.packs.segmentation`,
-:mod:`~spatial_intelligence.tools.packs.detection`), because segmentation and
-detection are different problems with different arguments, different outputs,
-and no reason to be edited in the same file.
+:mod:`~spatial_intelligence.tools.packs.detection`,
+:mod:`~spatial_intelligence.tools.packs.superres`), because they are different
+problems with different arguments, different outputs, and no reason to be
+edited in the same file.
 """
 
 from __future__ import annotations
@@ -33,11 +34,12 @@ class AIPack:
     def ai_models(self, task: str = "") -> list[dict]:
         """List the local AI models, what is downloaded, and what is in memory.
 
-        Each entry has id, task ("segmentation" or "detection"), prompts it
-        accepts, license, bytes, downloaded, loaded, provider, and the seconds it
-        has been idle. Filter with task when the request names one. Call this
-        before segment_image or detect_objects: it says whether a download is
-        needed and what is already costing memory.
+        Each entry has id, task ("segmentation", "detection", or
+        "super-resolution"), prompts it accepts, license, bytes, downloaded,
+        loaded, provider, and the seconds it has been idle. Filter with task
+        when the request names one. Call this before segment_image,
+        detect_objects, or super_resolve: it says whether a download is needed
+        and what is already costing memory.
         """
         return self._manager.status(task=task.strip() or None)
 
@@ -48,9 +50,9 @@ class AIPack:
         Files land under ``<GEOAI_HOME>/.models`` and are checked against the
         sha256 recorded in the catalog, so a rerun skips what is already there;
         set verify=True to re-hash the files on disk. Sizes: slimsam-77 is about
-        40 MB, yolos-tiny about 26 MB. The task tools download on their own when
-        a model is missing, so this is only needed to fetch ahead of time or to
-        repair a bad file.
+        40 MB, yolos-tiny about 26 MB, and sen2-sr about 68 MB. The task tools
+        download on their own when a model is missing, so this is only needed to
+        fetch ahead of time or to repair a bad file.
         """
         spec = find_model(model_id)
         job = self._rt.reporter.job(

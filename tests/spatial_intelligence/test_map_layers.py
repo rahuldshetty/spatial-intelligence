@@ -483,6 +483,30 @@ class MapLayerServiceTests(MapTestCase):
         self.assertNotIn("fillColour", layerops.find_layer(self.map, layer_id)["style"])
         self.assertNotIn(layer_id, self.map.project.get("styles", {}))
 
+    def test_style_layer_accepts_keys_added_after_2_9(self):
+        """The vocabulary follows the installed app, not a frozen 2.9 copy."""
+        self.geojson_file("data/points.geojson")
+        layer_id = layerops.add_geojson(
+            self.workspace, self.map, "data/points.geojson", "Points"
+        )
+
+        result = layerops.style_layer(
+            self.workspace,
+            self.map,
+            layer_id,
+            {
+                "strokeOpacity": 0.5,
+                "labels": {
+                    "enabled": True,
+                    "field": "name",
+                    "numberFormatEnabled": True,
+                },
+            },
+        )
+
+        self.assertEqual(result["style"]["strokeOpacity"], 0.5)
+        self.assertTrue(result["style"]["labels"]["numberFormatEnabled"])
+
     def test_style_layer_rejects_an_unknown_label_key(self):
         self.geojson_file("data/points.geojson")
         layer_id = layerops.add_geojson(
@@ -733,6 +757,84 @@ class LayersPackTests(MapTestCase):
             layerops.find_layer(self.map, layer_id)["sourcePath"],
             url_for("results/striped_cog.tif"),
         )
+        layer = layerops.find_layer(self.map, layer_id)
+        self.assertEqual(layer["metadata"]["bandCount"], 1)
+        self.assertEqual(len(layer["metadata"]["bounds"]), 4)
+
+    def test_a_missing_local_layer_is_pruned_on_reload(self):
+        import rasterio
+        from rasterio.transform import from_origin
+
+        source = self.workspace.resolve("data/gone.tif", write=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(
+            source, "w", driver="GTiff", width=64, height=64, count=1, dtype="uint8",
+            crs="EPSG:32645", transform=from_origin(500_000, 3_000_000, 10, 10),
+        ) as ds:
+            ds.write(numpy.zeros((1, 64, 64), dtype="uint8"))
+        registry = self.build_pack([], [])
+        layer_id = registry.get("add_raster").callable("data/gone.tif", "Gone")
+        layer = layerops.find_layer(self.map, layer_id)
+        rel = layer["metadata"][layerops.LOCAL_SOURCE_KEY]
+        self.workspace.resolve(rel).unlink()
+
+        layerops.repoint_local_rasters(self.map, self.workspace, url_for)
+
+        self.assertIsNone(layerops.find_layer(self.map, layer_id))
+
+    def test_reload_migrates_a_four_band_rgb_layer_to_a_three_band_copy(self):
+        import rasterio
+        from rasterio.transform import from_origin
+
+        source = self.workspace.resolve("data/four.tif", write=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        array = numpy.arange(4 * 512 * 512, dtype="uint16").reshape(4, 512, 512) % 9000
+        with rasterio.open(
+            source, "w", driver="GTiff", width=512, height=512, count=4, dtype="uint16",
+            crs="EPSG:32645", transform=from_origin(500_000, 3_000_000, 10, 10),
+        ) as ds:
+            ds.write(array)
+        layer_id = layerops.add_raster(
+            self.workspace, self.map, "data/four.tif", "Four", bands=[1, 2, 3],
+            file_url=url_for,
+        )
+
+        layerops.repoint_local_rasters(self.map, self.workspace, url_for)
+
+        layer = layerops.find_layer(self.map, layer_id)
+        self.assertTrue(layer["sourcePath"].endswith("_rgb.tif"))
+        self.assertIn("four", layer["sourcePath"])
+        self.assertEqual(layer["metadata"]["bandCount"], 3)
+        self.assertTrue(any(self.workspace.results.glob("four*_rgb.tif")))
+
+    def test_a_four_band_rgb_selection_gets_a_three_band_copy(self):
+        import rasterio
+        from rasterio.transform import from_origin
+
+        source = self.workspace.resolve("data/four.tif", write=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        array = numpy.arange(4 * 512 * 512, dtype="uint16").reshape(4, 512, 512) % 9000
+        with rasterio.open(
+            source, "w", driver="GTiff", width=512, height=512, count=4, dtype="uint16",
+            crs="EPSG:32645", transform=from_origin(500_000, 3_000_000, 10, 10),
+        ) as ds:
+            ds.write(array)
+        registry = self.build_pack([], [])
+
+        layer_id = registry.get("add_raster").callable(
+            "data/four.tif", "Four", None, None, [1, 2, 3]
+        )
+
+        layer = layerops.find_layer(self.map, layer_id)
+        self.assertIn("four_rgb.tif", layer["sourcePath"])
+        self.assertEqual(layer["metadata"]["bandCount"], 3)
+        copy = self.workspace.results / "four_rgb.tif"
+        with rasterio.open(copy) as dataset:
+            self.assertEqual(dataset.count, 3)
+            self.assertEqual(
+                [item.name for item in dataset.colorinterp], ["red", "green", "blue"]
+            )
+        self.assertFalse((self.workspace.results / "four_cog.tif").exists())
 
     def test_the_swipe_tool_compares_two_layers_by_name(self):
         notifications: list[str] = []
@@ -848,6 +950,37 @@ class LayersPackTests(MapTestCase):
 
         swipe = self.map.project["plugins"]["settings"]["maplibre-gl-swipe"]
         self.assertEqual(swipe["rightLayers"], ["__basemap__"])
+
+    def test_swipe_compare_can_be_cleared(self):
+        map_notifications: list[str] = []
+        registry = self.build_pack([], map_notifications)
+        self.geojson_file("data/points.geojson")
+        registry.get("add_geojson").callable("data/points.geojson", "Before")
+        registry.get("add_geojson").callable("data/points.geojson", "After")
+        registry.get("swipe_compare").callable(["Before"], ["After"])
+
+        result = registry.get("swipe_compare").callable(enabled=False)
+
+        plugins = self.map.project["plugins"]
+        self.assertEqual(result, {"status": "cleared", "swipe": None})
+        self.assertNotIn("maplibre-gl-swipe", plugins["settings"])
+        self.assertNotIn("maplibre-gl-swipe", plugins["activePluginIds"])
+        self.assertNotIn("maplibre-gl-swipe", plugins["mapControlPositions"])
+        self.assertEqual(
+            self.reload_map().describe()["layerCount"], 2
+        )  # the layers are untouched
+        self.assertEqual(map_notifications, ["map", "map", "map", "map"])
+        # Clearing again is harmless.
+        self.assertEqual(
+            registry.get("swipe_compare").callable(enabled=False)["status"], "cleared"
+        )
+
+    def test_swipe_compare_requires_both_sides_when_enabled(self):
+        registry = self.build_pack([], [])
+
+        with self.assertRaises(ToolInputError) as caught:
+            registry.get("swipe_compare").callable(enabled=True)
+        self.assertIn("enabled=False", str(caught.exception))
 
     def test_swipe_compare_rejects_an_unknown_layer_and_an_empty_side(self):
         registry = self.build_pack([], [])

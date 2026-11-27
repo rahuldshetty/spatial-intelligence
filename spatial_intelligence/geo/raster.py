@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import rasterio
@@ -238,6 +238,61 @@ def to_cog_if_needed(
     return written, True
 
 
+def rgb_display_copy(
+    workspace: Workspace,
+    path: str,
+    bands: Sequence[int],
+    *,
+    job: Job | None = None,
+) -> Path | None:
+    """Write a three-band RGB copy of a raster, or return ``None``.
+
+    GeoLibre's in-browser GeoTIFF reader renders three-band RGB reliably but
+    rejects four-band uint16 COGs (the 10 m/SR products carry NIR as band 4).
+    A map layer only needs the requested three bands, so the copy is a display
+    artifact; the source keeps all bands for analysis.
+    """
+    from rasterio.enums import ColorInterp, Resampling
+
+    source = workspace.resolve(path, must_exist=True)
+    selected = list(bands)
+    if len(selected) != 3 or any(index < 1 for index in selected):
+        return None
+    with rasterio.open(source) as dataset:
+        if dataset.count <= 3 or max(selected) > dataset.count:
+            return None
+        array = dataset.read(selected)
+        target = workspace.results / f"{source.stem}_rgb.tif"
+        profile = {
+            "driver": "GTiff",
+            "width": dataset.width,
+            "height": dataset.height,
+            "count": 3,
+            "dtype": array.dtype.name,
+            "crs": dataset.crs,
+            "transform": dataset.transform,
+            "nodata": dataset.nodata,
+            "tiled": True,
+            "blockxsize": 256,
+            "blockysize": 256,
+            "compress": "deflate",
+            "interleave": "pixel",
+        }
+        with rasterio.open(target, "w", **profile) as output:
+            output.write(array)
+            output.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue]
+            levels = [
+                level
+                for level in (2, 4, 8, 16)
+                if max(dataset.width, dataset.height) // level >= 1
+            ]
+            if levels:
+                output.build_overviews(levels, Resampling.average)
+                output.update_tags(ns="rio_overview", resampling="average")
+    _advance(job, f"{source.stem} RGB")
+    return target
+
+
 def to_cog(
     workspace: Workspace,
     path: str,
@@ -456,9 +511,12 @@ def rescale(
             else:
                 vmin = vmin if vmin is not None else float(valid.min())
                 vmax = vmax if vmax is not None else float(valid.max())
-        scaled = np.clip((arr - vmin) / (vmax - vmin) * 255.0, 0, 255).astype("uint8")
+        scaled = np.clip((arr - vmin) / (vmax - vmin) * 255.0, 0, 255)
         if nodata is not None:
-            scaled = np.where(np.isnan(arr), 0, scaled)
+            # 0 is the output's nodata, which a renderer discards; keep it for
+            # masked pixels only or a valid dark pixel becomes a see-through hole.
+            scaled = np.where(np.isnan(arr), 0, np.maximum(scaled, 1))
+        scaled = scaled.astype("uint8")
         profile = src.profile.copy()
         profile.update(dtype="uint8", count=1, driver="COG", compress="deflate")
         if nodata is not None:
@@ -1062,7 +1120,11 @@ def compose_rgb(
     file with three bands. All three inputs must already share a grid and CRS
     (``reproject`` and ``clip`` them to one first). ``stretch`` scales each band
     between its ``pmin``/``pmax`` percentiles, which is what makes the result
-    look like imagery rather than a dark rectangle.
+    look like imagery rather than a dark rectangle. The output declares nodata=0
+    when any input has a nodata value, so 0 is reserved for source-nodata
+    pixels: a valid pixel the stretch clamps to 0 is written as 1, because a
+    renderer discards nodata pixels and the map would show the basemap through
+    the hole.
     """
     dst = _target(workspace, out)
     with _source(workspace, red, whole=True) as red_ds, _source(
@@ -1075,7 +1137,17 @@ def compose_rgb(
                     "reproject and clip them to one grid first"
                 )
         profile = red_ds.profile.copy()
-        profile.update(dtype="uint8", count=3, driver="COG", compress="deflate")
+        # Bands are written with 0 for masked pixels, so the output's nodata is
+        # 0 whenever an input declares one: an inherited value such as -9999
+        # cannot survive the uint8 cast and would be dropped silently.
+        has_nodata = any(ds.nodata is not None for ds in (red_ds, green_ds, blue_ds))
+        profile.update(
+            dtype="uint8",
+            count=3,
+            driver="COG",
+            compress="deflate",
+            nodata=0 if has_nodata else None,
+        )
         with rasterio.open(dst, "w", **profile) as dest:
             for index, source in enumerate((red_ds, green_ds, blue_ds), start=1):
                 band = source.read(1, masked=True).astype("float64")
@@ -1090,8 +1162,15 @@ def compose_rgb(
                 if high <= low:
                     high = low + 1.0
                 scaled = np.clip((np.ma.getdata(band) - low) / (high - low) * 255.0, 0, 255)
+                # 0 is the output's nodata (the source profile carries it) and a
+                # renderer discards nodata pixels, so a valid pixel the stretch
+                # clamps to 0 would become a see-through hole over the basemap.
+                # Reserve 0 for masked pixels; valid pixels start at 1.
                 dest.write(
-                    np.where(np.ma.getmaskarray(band), 0, scaled).astype("uint8"), index
+                    np.where(np.ma.getmaskarray(band), 0, np.maximum(scaled, 1)).astype(
+                        "uint8"
+                    ),
+                    index,
                 )
     return dst
 

@@ -35,7 +35,7 @@ def snapshot_path(workspace: Workspace) -> Path:
 
 def create_map(workspace: Workspace, *, height: str = "100%", theme: str = "light") -> Map:
     """Create the shared map, restoring the last saved snapshot if present."""
-    m = Map(height=height, layout="embed", theme=theme)
+    m = Map(height=height, app_layout="embed", theme=theme)
     snapshot = snapshot_path(workspace)
     if snapshot.exists():
         m.load_project(snapshot)

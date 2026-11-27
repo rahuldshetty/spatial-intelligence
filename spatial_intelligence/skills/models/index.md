@@ -31,10 +31,30 @@ fetch — load the state dict from `models.path(...)` yourself, as
 | Fields of the World U-Net (`skill("torchgeo")`) | agricultural **field boundaries** | Sentinel-2 `B4,B3,B2,B8` × 2 dates, uint16 | pretrained smp U-Net, 2- or 3-class, ~53 MB |
 | SlimSAM (`slimsam-77`, in the catalog) | promptable segmentation | RGB | the built-in `segment_image` model, ONNX, no torch needed |
 | YOLOS-tiny (`yolos-tiny`, in the catalog) | object detection | RGB | the built-in `detect_objects` model, COCO classes |
+| [OpenSR SEN2-SR](https://srgan.opensr.eu) (`sen2-sr`, in the catalog) | Sentinel-2 4x super-resolution | B04/B03/B02/B08 raw DN, 10 m | the built-in `super_resolve` model, MIT, 68 MB, texture-oriented |
 
-The built-in ONNX models are the default for segmentation and detection. Reach
-for the models in this tree when the task needs multispectral input, a
-task-specific fine-tune, or features rather than masks.
+The built-in models are the default for segmentation, detection, and
+super-resolution. Reach for the models in this tree when the task needs
+multispectral input, a task-specific fine-tune, or features rather than masks.
+
+## SEN2-SR input
+
+`sen2-sr` is Sentinel-2 specific. It takes exactly four **10 m raw-DN** bands in
+this order:
+
+| Band | Name | Role |
+|---|---|---|
+| 1 | B04 | red |
+| 2 | B03 | green |
+| 3 | B02 | blue |
+| 4 | B08 | NIR |
+
+Pass uint16 reflectance DN as stored (do not divide by 10000). A three-band
+TCI/RGB image, an 8-bit composite, a float stack, or a 20 m stack is refused:
+it is not the model's input. A standard 12-band L2A stack usually needs
+`bands=[4, 3, 2, 8]`. The output is four uint16 bands at 2.5 m; use bands 1-3 for
+RGB and band 4 for NIR. The OpenSR package applies measurement-consistency
+back-projection, but the detail is generated, not measured.
 
 ## Rules
 

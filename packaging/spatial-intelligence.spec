@@ -46,6 +46,11 @@ for pkg in (
     "shapely",
     "pyproj",
     "geopandas",
+    "opensr_srgan",
+    "pytorch_lightning",
+    "torch",
+    "torchvision",
+    "kornia",
 ):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
@@ -63,6 +68,8 @@ for dist in (
     "logfire",
     "geolibre",
     "orthority",
+    "opensr_srgan",
+    "pytorch_lightning",
 ):
     datas += copy_metadata(dist)
 

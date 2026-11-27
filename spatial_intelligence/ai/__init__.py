@@ -10,9 +10,9 @@ Two layers, deliberately separate:
 - the task layer — one module per problem: :mod:`~spatial_intelligence.ai.segmentation`
   answers "where does this object end" with prompts and masks,
   :mod:`~spatial_intelligence.ai.detection` answers "what known objects are
-  here" with boxes. They share only
-  :mod:`~spatial_intelligence.ai.tiles`, which is how a raster too big for one
-  model pass is read.
+  here" with boxes, and :mod:`~spatial_intelligence.ai.superres` upscales a
+  raster 4x. They share only :mod:`~spatial_intelligence.ai.tiles`, which is how
+  a raster too big for one model pass is read.
 
 Adding a task means a new module and a new tool pack; adding a model for an
 existing task means a catalog entry.

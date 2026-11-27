@@ -199,6 +199,22 @@ CAPABILITIES: tuple[Capability, ...] = (
         tools=("ai_models", "ai_pull_model", "ai_unload_model", "detect_objects"),
     ),
     Capability(
+        id="imagery.super-resolution",
+        title="Local Sentinel-2 4x super-resolution (OpenSR SEN2-SR)",
+        summary=(
+            "Upscale a Sentinel-2 B04/B03/B02/B08 raw-DN stack from 10 m to 2.5 m "
+            "with the official OpenSR SEN2-SR model, on this machine. It returns "
+            "four bands: RGB plus NIR, with generated fine detail."
+        ),
+        keywords=(
+            "super", "resolution", "super-resolution", "superresolution", "upscale",
+            "enhance", "detail", "4x", "opensr", "sen2-sr", "sentinel-2", "2.5m",
+            "rgbn", "reflectance", "nir", "srgan",
+        ),
+        implementation="backend (PyTorch / OpenSR SRGAN, models cached under .models)",
+        tools=("ai_models", "ai_pull_model", "ai_unload_model", "super_resolve"),
+    ),
+    Capability(
         id="ai.sandbox-packages",
         title="Heavy geospatial AI libraries in the sandbox",
         summary=(
